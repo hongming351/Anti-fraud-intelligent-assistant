@@ -1,0 +1,4 @@
+# Requirements for multimodal_processing module
+openai>=1.0.0
+openai-whisper>=20250625
+python-dotenv>=1.0.0
