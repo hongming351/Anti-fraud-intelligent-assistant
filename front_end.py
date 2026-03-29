@@ -2,7 +2,12 @@ import streamlit as st
 import pandas as pd
 import time
 import json
+import requests
 from datetime import datetime
+
+# 后端API配置
+BACKEND_URL = "http://localhost:8000"
+API_PREFIX = "/api/v1"
 
 # 页面配置
 st.set_page_config(
@@ -54,9 +59,116 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# 侧边栏：用户角色与监护人设置
+# 用户认证和API调用函数
+def register_user(username, email, password, role, gender, risk_sensitivity, guardian_name="", guardian_phone="", guardian_email=""):
+    """注册新用户"""
+    try:
+        url = f"{BACKEND_URL}{API_PREFIX}/auth/register"
+        data = {
+            "username": username,
+            "email": email,
+            "password": password,
+            "role": role,
+            "gender": gender,
+            "risk_sensitivity": risk_sensitivity,
+            "guardian_name": guardian_name,
+            "guardian_phone": guardian_phone,
+            "guardian_email": guardian_email
+        }
+        response = requests.post(url, json=data)
+        return response.json() if response.status_code == 200 else None
+    except Exception as e:
+        st.error(f"注册失败: {e}")
+        return None
+
+def login_user(username, password):
+    """用户登录"""
+    try:
+        url = f"{BACKEND_URL}{API_PREFIX}/auth/login"
+        data = {
+            "username": username,
+            "password": password
+        }
+        response = requests.post(url, data=data)
+        if response.status_code == 200:
+            result = response.json()
+            st.session_state["access_token"] = result.get("access_token")
+            st.session_state["user_info"] = result.get("user")
+            return True
+        return False
+    except Exception as e:
+        st.error(f"登录失败: {e}")
+        return False
+
+# 侧边栏：用户认证与个性化设置
 with st.sidebar:
     st.image("https://img.icons8.com/color/96/000000/artificial-intelligence.png", width=80)
+    
+    # 用户认证部分
+    st.title("🔐 用户认证")
+    st.markdown("---")
+    
+    # 初始化session state
+    if "access_token" not in st.session_state:
+        st.session_state["access_token"] = None
+    if "user_info" not in st.session_state:
+        st.session_state["user_info"] = None
+    
+    if st.session_state["access_token"]:
+        # 已登录状态
+        user_info = st.session_state["user_info"] or {}
+        st.success(f"✅ 已登录: {user_info.get('username', '用户')}")
+        st.caption(f"角色: {user_info.get('role', '未设置')}")
+        st.caption(f"邮箱: {user_info.get('email', '未设置')}")
+        
+        if st.button("🚪 退出登录"):
+            st.session_state["access_token"] = None
+            st.session_state["user_info"] = None
+            st.rerun()
+    else:
+        # 未登录状态 - 显示登录/注册表单
+        auth_tab = st.selectbox("选择操作", ["登录", "注册"])
+        
+        if auth_tab == "登录":
+            login_username = st.text_input("用户名", key="login_username")
+            login_password = st.text_input("密码", type="password", key="login_password")
+            
+            if st.button("🔑 登录", width='stretch'):
+                if login_username and login_password:
+                    if login_user(login_username, login_password):
+                        st.success("登录成功！")
+                        st.rerun()
+                    else:
+                        st.error("登录失败，请检查用户名和密码")
+                else:
+                    st.warning("请输入用户名和密码")
+        
+        else:  # 注册
+            reg_username = st.text_input("用户名", key="reg_username")
+            reg_email = st.text_input("邮箱", key="reg_email")
+            reg_password = st.text_input("密码", type="password", key="reg_password")
+            reg_confirm_password = st.text_input("确认密码", type="password", key="reg_confirm_password")
+            
+            if st.button("📝 注册", width='stretch'):
+                if not reg_username or not reg_email or not reg_password:
+                    st.warning("请填写所有必填字段")
+                elif reg_password != reg_confirm_password:
+                    st.error("两次输入的密码不一致")
+                else:
+                    result = register_user(
+                        username=reg_username,
+                        email=reg_email,
+                        password=reg_password,
+                        role="青年（学生/职场新人）",
+                        gender="男",
+                        risk_sensitivity="中"
+                    )
+                    if result:
+                        st.success("注册成功！请登录")
+                    else:
+                        st.error("注册失败，用户名或邮箱可能已被使用")
+    
+    st.markdown("---")
     st.title("⚙️ 个性化设置")
     st.markdown("---")
     
@@ -129,11 +241,56 @@ with col_image:
     st.caption("支持屏幕截图、视频截图、图片")
     image_file = st.file_uploader("上传图片/截图", type=["jpg", "jpeg", "png"], key="image")
     if image_file is not None:
-        st.image(image_file, caption="上传的图片", use_container_width=True)
+        st.image(image_file, caption="上传的图片", width='stretch')
         input_data["image"] = image_file.name
         st.success("图片已上传，将进行OCR和场景分析")
     else:
         st.info("未上传图片")
+
+def call_backend_analysis(text, audio_file, image_file, enable_deep_audio, enable_ocr, enable_behavior_profile):
+    """调用后端API进行多模态分析"""
+    try:
+        url = f"{BACKEND_URL}{API_PREFIX}/analyze/multimodal"
+        
+        # 准备请求数据
+        files = {}
+        data = {
+            "enable_deep_analysis": enable_behavior_profile,
+            "enable_deep_audio": enable_deep_audio,
+            "enable_ocr": enable_ocr
+        }
+        
+        # 如果有文本，添加到数据中
+        if text:
+            data["text"] = text
+        
+        # 如果有音频文件
+        if audio_file:
+            files["audio_file"] = (audio_file.name, audio_file.getvalue(), audio_file.type)
+        
+        # 如果有图片文件
+        if image_file:
+            files["image_file"] = (image_file.name, image_file.getvalue(), image_file.type)
+        
+        # 如果有token，添加到headers
+        headers = {}
+        if "access_token" in st.session_state:
+            headers["Authorization"] = f"Bearer {st.session_state['access_token']}"
+        
+        # 发送请求
+        if files:
+            response = requests.post(url, data=data, files=files, headers=headers)
+        else:
+            response = requests.post(url, json=data, headers=headers)
+        
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"分析失败: {response.status_code} - {response.text}")
+            return None
+    except Exception as e:
+        st.error(f"调用API失败: {e}")
+        return None
 
 # 高级选项
 with st.expander("🔍 高级分析选项"):
@@ -147,7 +304,6 @@ with st.expander("🔍 高级分析选项"):
     
     st.caption("注：启用更多分析可能增加响应时间，但提升准确率")
 
-# 模拟后端分析函数（实际应调用API）
 def mock_analysis(text, audio_flag, image_flag, role, sensitivity):
     """模拟多模态融合分析，返回风险等级、类型、置信度、建议等"""
     # 基础风险判断（基于关键词）
@@ -232,55 +388,78 @@ def mock_analysis(text, audio_flag, image_flag, role, sensitivity):
 st.markdown("---")
 col_btn, col_status = st.columns([1, 3])
 with col_btn:
-    analyze_btn = st.button("🚨 立即智能分析", type="primary", use_container_width=True)
+    analyze_btn = st.button("🚨 立即智能分析", type="primary", width='stretch')
 
 # 结果展示区域
 if analyze_btn:
-    if not input_data["text"] and not input_data["audio"] and not input_data["image"]:
+    if not input_data["text"] and not audio_file and not image_file:
         st.warning("请至少输入文本、上传音频或图片其中一种数据进行分析")
     else:
         with st.spinner("正在多模态融合分析中... 语音特征提取中 | 图像OCR识别中 | 行为画像匹配中"):
-            time.sleep(2)  # 模拟分析耗时
-            result = mock_analysis(
+            # 尝试调用后端API
+            backend_result = call_backend_analysis(
                 text=input_data["text"],
-                audio_flag=input_data["audio"] is not None,
-                image_flag=input_data["image"] is not None,
-                role=role,
-                sensitivity=risk_sensitivity
+                audio_file=audio_file,
+                image_file=image_file,
+                enable_deep_audio=enable_deep_audio,
+                enable_ocr=enable_ocr,
+                enable_behavior_profile=enable_behavior_profile
             )
+            
+            if backend_result:
+                # 使用后端API返回的结果
+                result = backend_result
+                # 转换风险等级为中文
+                risk_level_map = {"high": "高危", "medium": "中危", "low": "低危"}
+                level = risk_level_map.get(result.get("risk_level", "low"), "低危")
+                level_class_map = {"high": "risk-high", "medium": "risk-mid", "low": "risk-low"}
+                level_class = level_class_map.get(result.get("risk_level", "low"), "risk-low")
+            else:
+                # 如果后端API调用失败，使用模拟分析
+                st.warning("后端API调用失败，使用模拟分析结果")
+                time.sleep(1)  # 模拟分析耗时
+                result = mock_analysis(
+                    text=input_data["text"],
+                    audio_flag=input_data["audio"] is not None,
+                    image_flag=input_data["image"] is not None,
+                    role=role,
+                    sensitivity=risk_sensitivity
+                )
+                level = result["level"]
+                level_class = result["level_class"]
         
         # 显示结果卡片
         st.markdown("## 📊 智能分析结果")
         with st.container():
-            st.markdown(f'<div class="{result["level_class"]}">', unsafe_allow_html=True)
+            st.markdown(f'<div class="{level_class}">', unsafe_allow_html=True)
             col1, col2, col3 = st.columns(3)
             with col1:
-                st.metric("风险等级", result["level"], delta=None)
-                st.metric("置信度", f"{result['confidence']:.1%}")
+                st.metric("风险等级", level, delta=None)
+                st.metric("置信度", f"{result.get('confidence', 0.7):.1%}")
             with col2:
-                st.metric("诈骗类型", result["fraud_type"])
-                st.metric("风险评分", f"{result['risk_score']:.0f}/100")
+                st.metric("诈骗类型", result.get("fraud_type", "未知类型"))
+                st.metric("风险评分", f"{result.get('risk_score', 0):.0f}/100")
             with col3:
-                st.metric("分析时间", result["timestamp"])
-                if result["level"] == "高危":
+                st.metric("分析时间", result.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
+                if level == "高危":
                     st.error("⚠️ 立即阻断")
-                elif result["level"] == "中危":
+                elif level == "中危":
                     st.warning("⚠️ 需警惕")
                 else:
                     st.info("✅ 正常")
-            st.markdown(f"**🔍 详细分析：** {result['details']}")
-            st.markdown(f"**💡 处置建议：** {result['advice']}")
+            st.markdown(f"**🔍 详细分析：** {result.get('details', '无详细分析')}")
+            st.markdown(f"**💡 处置建议：** {result.get('advice', '请保持警惕')}")
             st.markdown('</div>', unsafe_allow_html=True)
         
         # 分级预警展示
         st.markdown("### 🔔 实时预警机制")
-        if result["level"] == "高危":
+        if level == "高危":
             st.error("🔴 高危预警：已触发弹窗阻断并自动通知监护人！")
             if guardian_phone:
                 st.warning(f"📞 正在拨打监护人电话 {guardian_phone} 进行紧急联动...")
             else:
                 st.info("请完善监护人信息以启用自动联动")
-        elif result["level"] == "中危":
+        elif level == "中危":
             st.warning("🟡 中危提醒：建议立即核实对方身份，谨防受骗。")
         else:
             st.info("🔵 当前会话安全，持续监控中。")
@@ -291,16 +470,16 @@ if analyze_btn:
             "用户角色": role,
             "性别": gender,
             "监护人": guardian_name if guardian_name else "未设置",
-            "分析时间": result["timestamp"],
-            "风险等级": result["level"],
-            "诈骗类型": result["fraud_type"],
-            "置信度": f"{result['confidence']:.1%}",
-            "详细分析": result["details"],
-            "处置建议": result["advice"],
-            "多模态输入": f"文本: {'有' if input_data['text'] else '无'}, 音频: {'有' if input_data['audio'] else '无'}, 图像: {'有' if input_data['image'] else '无'}"
+            "分析时间": result.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "风险等级": level,
+            "诈骗类型": result.get("fraud_type", "未知类型"),
+            "置信度": f"{result.get('confidence', 0.7):.1%}",
+            "详细分析": result.get("details", "无详细分析"),
+            "处置建议": result.get("advice", "请保持警惕"),
+            "多模态输入": f"文本: {'有' if input_data['text'] else '无'}, 音频: {'有' if audio_file else '无'}, 图像: {'有' if image_file else '无'}"
         }
         report_df = pd.DataFrame([report_data])
-        st.dataframe(report_df, use_container_width=True)
+        st.dataframe(report_df, width='stretch')
         
         csv = report_df.to_csv(index=False).encode('utf-8')
         st.download_button(
