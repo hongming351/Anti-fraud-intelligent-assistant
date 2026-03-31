@@ -9,6 +9,26 @@ from datetime import datetime
 BACKEND_URL = "http://localhost:8000"
 API_PREFIX = "/api/v1"
 
+# 角色/性别/灵敏度映射
+ROLE_MAP = {
+    "儿童/青少年": "child",
+    "青年（学生/职场新人）": "youth",
+    "中年（职场人士）": "adult",
+    "老年人": "elderly",
+    "财务/高管（高风险）": "high_risk"
+}
+
+GENDER_MAP = {
+    "男": "male",
+    "女": "female"
+}
+
+RISK_MAP = {
+    "低": "low",
+    "中": "medium",
+    "高": "high"
+}
+
 # 页面配置
 st.set_page_config(
     page_title="多模态反诈智能助手",
@@ -68,15 +88,18 @@ def register_user(username, email, password, role, gender, risk_sensitivity, gua
             "username": username,
             "email": email,
             "password": password,
-            "role": role,
-            "gender": gender,
-            "risk_sensitivity": risk_sensitivity,
+            "role": ROLE_MAP.get(role, "youth"),
+            "gender": GENDER_MAP.get(gender, gender),
+            "risk_sensitivity": RISK_MAP.get(risk_sensitivity, "medium"),
             "guardian_name": guardian_name,
             "guardian_phone": guardian_phone,
             "guardian_email": guardian_email
         }
         response = requests.post(url, json=data)
-        return response.json() if response.status_code == 200 else None
+        if response.status_code in (200, 201):
+            return response.json()
+        st.error(f"注册失败：{response.status_code} - {response.text}")
+        return None
     except Exception as e:
         st.error(f"注册失败: {e}")
         return None
@@ -133,7 +156,7 @@ with st.sidebar:
             login_username = st.text_input("用户名", key="login_username")
             login_password = st.text_input("密码", type="password", key="login_password")
             
-            if st.button("🔑 登录", width='stretch'):
+            if st.button("🔑 登录"):
                 if login_username and login_password:
                     if login_user(login_username, login_password):
                         st.success("登录成功！")
@@ -149,7 +172,7 @@ with st.sidebar:
             reg_password = st.text_input("密码", type="password", key="reg_password")
             reg_confirm_password = st.text_input("确认密码", type="password", key="reg_confirm_password")
             
-            if st.button("📝 注册", width='stretch'):
+            if st.button("📝 注册"):
                 if not reg_username or not reg_email or not reg_password:
                     st.warning("请填写所有必填字段")
                 elif reg_password != reg_confirm_password:
@@ -159,9 +182,12 @@ with st.sidebar:
                         username=reg_username,
                         email=reg_email,
                         password=reg_password,
-                        role="青年（学生/职场新人）",
-                        gender="男",
-                        risk_sensitivity="中"
+                        role=role,
+                        gender=gender,
+                        risk_sensitivity=risk_sensitivity,
+                        guardian_name=guardian_name,
+                        guardian_phone=guardian_phone,
+                        guardian_email=guardian_email
                     )
                     if result:
                         st.success("注册成功！请登录")
@@ -241,7 +267,7 @@ with col_image:
     st.caption("支持屏幕截图、视频截图、图片")
     image_file = st.file_uploader("上传图片/截图", type=["jpg", "jpeg", "png"], key="image")
     if image_file is not None:
-        st.image(image_file, caption="上传的图片", width='stretch')
+        st.image(image_file, caption="上传的图片")
         input_data["image"] = image_file.name
         st.success("图片已上传，将进行OCR和场景分析")
     else:
@@ -255,14 +281,12 @@ def call_backend_analysis(text, audio_file, image_file, enable_deep_audio, enabl
         # 准备请求数据
         files = {}
         data = {
-            "enable_deep_analysis": enable_behavior_profile,
-            "enable_deep_audio": enable_deep_audio,
-            "enable_ocr": enable_ocr
+            "text": text or "",
+            "enable_deep_analysis": str(enable_behavior_profile).lower(),
+            "enable_deep_audio": str(enable_deep_audio).lower(),
+            "enable_ocr": str(enable_ocr).lower(),
+            "enable_behavior_profile": str(enable_behavior_profile).lower()
         }
-        
-        # 如果有文本，添加到数据中
-        if text:
-            data["text"] = text
         
         # 如果有音频文件
         if audio_file:
@@ -274,16 +298,13 @@ def call_backend_analysis(text, audio_file, image_file, enable_deep_audio, enabl
         
         # 如果有token，添加到headers
         headers = {}
-        if "access_token" in st.session_state:
+        if "access_token" in st.session_state and st.session_state["access_token"]:
             headers["Authorization"] = f"Bearer {st.session_state['access_token']}"
         
-        # 发送请求
-        if files:
-            response = requests.post(url, data=data, files=files, headers=headers)
-        else:
-            response = requests.post(url, json=data, headers=headers)
+        # 发送请求，统一使用表单方式
+        response = requests.post(url, data=data, files=files or None, headers=headers)
         
-        if response.status_code == 200:
+        if response.status_code in (200, 201):
             return response.json()
         else:
             st.error(f"分析失败: {response.status_code} - {response.text}")
@@ -343,7 +364,8 @@ def mock_analysis(text, audio_flag, image_flag, role, sensitivity):
     # 图片文件存在模拟风险
     if image_flag:
         risk_score += 10
-        if "二维码" in text_input.lower() or (image_flag and "二维码" in str(image_flag).lower()):
+        text_lower = text.lower() if text else ""
+        if "二维码" in text_lower:
             risk_score += 15
             details += "；图片包含二维码或钓鱼界面"
         else:
@@ -388,7 +410,7 @@ def mock_analysis(text, audio_flag, image_flag, role, sensitivity):
 st.markdown("---")
 col_btn, col_status = st.columns([1, 3])
 with col_btn:
-    analyze_btn = st.button("🚨 立即智能分析", type="primary", width='stretch')
+    analyze_btn = st.button("🚨 立即智能分析", type="primary")
 
 # 结果展示区域
 if analyze_btn:
@@ -479,7 +501,7 @@ if analyze_btn:
             "多模态输入": f"文本: {'有' if input_data['text'] else '无'}, 音频: {'有' if audio_file else '无'}, 图像: {'有' if image_file else '无'}"
         }
         report_df = pd.DataFrame([report_data])
-        st.dataframe(report_df, width='stretch')
+        st.dataframe(report_df)
         
         csv = report_df.to_csv(index=False).encode('utf-8')
         st.download_button(
