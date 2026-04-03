@@ -34,12 +34,33 @@ st.set_page_config(
     page_title="多模态反诈智能助手",
     page_icon="🛡️",
     layout="wide",
-    initial_sidebar_state="expanded"
+    initial_sidebar_state="collapsed"
 )
 
-# 自定义CSS样式
-st.markdown("""
+# 初始化主题设置
+if "theme" not in st.session_state:
+    st.session_state["theme"] = "light"
+
+# 主题CSS
+light_theme = """
 <style>
+    body {
+        background-color: #f8f9fa;
+        color: #333;
+    }
+    .main-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .auth-container {
+        max-width: 400px;
+        margin: 5rem auto;
+        padding: 2rem;
+        background: white;
+        border-radius: 1rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
     .main-header {
         font-size: 2.5rem;
         color: #1E3A8A;
@@ -76,8 +97,102 @@ st.markdown("""
         margin-top: 2rem;
         color: #6B7280;
     }
+    .theme-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+    }
 </style>
-""", unsafe_allow_html=True)
+"""
+
+dark_theme = """
+<style>
+    body {
+        background-color: #1e1e1e;
+        color: #e0e0e0;
+    }
+    .main-container {
+        max-width: 800px;
+        margin: 0 auto;
+        padding: 2rem;
+    }
+    .auth-container {
+        max-width: 400px;
+        margin: 5rem auto;
+        padding: 2rem;
+        background: #2d2d2d;
+        border-radius: 1rem;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+    }
+    .main-header {
+        font-size: 2.5rem;
+        color: #64b5f6;
+        text-align: center;
+        margin-bottom: 1rem;
+    }
+    .risk-high {
+        background-color: #4a1e1e;
+        border-left: 5px solid #dc2626;
+        padding: 1rem;
+        border-radius: 0.5rem;
+    }
+    .risk-mid {
+        background-color: #4a3a1e;
+        border-left: 5px solid #f59e0b;
+        padding: 1rem;
+        border-radius: 0.5rem;
+    }
+    .risk-low {
+        background-color: #1e2a4a;
+        border-left: 5px solid #3b82f6;
+        padding: 1rem;
+        border-radius: 0.5rem;
+    }
+    .warning-box {
+        background-color: #4a1e2a;
+        border: 1px solid #ffccc7;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        margin: 1rem 0;
+    }
+    .footer {
+        text-align: center;
+        margin-top: 2rem;
+        color: #999;
+    }
+    .theme-toggle {
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 1000;
+    }
+    input, textarea, select {
+        background-color: #3d3d3d !important;
+        color: #e0e0e0 !important;
+        border: 1px solid #555 !important;
+    }
+    button {
+        background-color: #3b82f6 !important;
+        color: white !important;
+    }
+</style>
+"""
+
+# 应用主题
+if st.session_state["theme"] == "dark":
+    st.markdown(dark_theme, unsafe_allow_html=True)
+else:
+    st.markdown(light_theme, unsafe_allow_html=True)
+
+# 主题切换按钮
+st.markdown('<div class="theme-toggle">', unsafe_allow_html=True)
+col_theme = st.columns([1, 1])
+with col_theme[0]:
+    if st.button("🌙 切换暗色模式" if st.session_state["theme"] == "light" else "☀️ 切换亮色模式"):
+        st.session_state["theme"] = "dark" if st.session_state["theme"] == "light" else "light"
+        st.rerun()
+st.markdown('</div>', unsafe_allow_html=True)
 
 # 用户认证和API调用函数
 def register_user(username, email, password, role, gender, risk_sensitivity, guardian_name="", guardian_phone="", guardian_email=""):
@@ -145,26 +260,39 @@ def login_user(username, password):
         st.error(f"登录请求异常: {e}")
         return False
 
-# 侧边栏：用户认证与个性化设置
-with st.sidebar:
-    st.image("https://img.icons8.com/color/96/000000/artificial-intelligence.png", width=80)
+# 初始化session state
+if "access_token" not in st.session_state:
+    st.session_state["access_token"] = None
+if "user_info" not in st.session_state:
+    st.session_state["user_info"] = None
+if "role" not in st.session_state:
+    st.session_state["role"] = "青年（学生/职场新人）"
+if "gender" not in st.session_state:
+    st.session_state["gender"] = "男"
+if "risk_sensitivity" not in st.session_state:
+    st.session_state["risk_sensitivity"] = "中"
+if "guardian_name" not in st.session_state:
+    st.session_state["guardian_name"] = ""
+if "guardian_phone" not in st.session_state:
+    st.session_state["guardian_phone"] = ""
+if "guardian_email" not in st.session_state:
+    st.session_state["guardian_email"] = ""
+
+# 认证检查
+if not st.session_state["access_token"]:
+    # 未登录状态 - 显示居中的登录/注册表单
+    st.markdown('<div class="auth-container">', unsafe_allow_html=True)
     
-    # 用户认证部分
-    st.title("🔐 用户认证")
+    st.markdown('<div class="main-header">🛡️ 多模态反诈智能助手</div>', unsafe_allow_html=True)
+    st.markdown('<div style="text-align: center;">基于多模态AI的实时反诈防护系统</div>', unsafe_allow_html=True)
     st.markdown("---")
     
-    # 初始化session state
-    if "access_token" not in st.session_state:
-        st.session_state["access_token"] = None
-    if "user_info" not in st.session_state:
-        st.session_state["user_info"] = None
+    auth_tab = st.selectbox("选择操作", ["登录", "注册"], index=0)
     
-    if st.session_state["access_token"]:
-        # 已登录状态
-        user_info = st.session_state["user_info"] or {}
-        st.success(f"✅ 已登录: {user_info.get('username', '用户')}")
-        st.caption(f"角色: {user_info.get('role', '未设置')}")
-        st.caption(f"邮箱: {user_info.get('email', '未设置')}")
+    if auth_tab == "登录":
+        st.subheader("🔑 用户登录")
+        login_username = st.text_input("用户名", key="login_username")
+        login_password = st.text_input("密码", type="password", key="login_password")
         
         if st.button("🚪 退出登录"):
             st.session_state["access_token"] = None
@@ -186,7 +314,16 @@ with st.sidebar:
                     else:
                         st.error("登录失败，请检查用户名和密码")
                 else:
-                    st.warning("请输入用户名和密码")
+                    st.error("登录失败，请检查用户名和密码")
+            else:
+                st.warning("请输入用户名和密码")
+    
+    else:  # 注册
+        st.subheader("📝 用户注册")
+        reg_username = st.text_input("用户名", key="reg_username")
+        reg_email = st.text_input("邮箱", key="reg_email")
+        reg_password = st.text_input("密码", type="password", key="reg_password")
+        reg_confirm_password = st.text_input("确认密码", type="password", key="reg_confirm_password")
         
         else:  # 注册
             reg_username = st.text_input("用户名", key="reg_username")
@@ -244,24 +381,25 @@ with st.sidebar:
     
     # 角色定制
     st.subheader("👤 我的角色")
-    role = st.selectbox(
+    st.session_state["role"] = st.selectbox(
         "选择您的身份",
-        ["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"]
+        ["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"],
+        index=["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"].index(st.session_state["role"])
     )
-    gender = st.radio("性别", ["男", "女"], horizontal=True)
+    st.session_state["gender"] = st.radio("性别", ["男", "女"], horizontal=True, index=0 if st.session_state["gender"] == "男" else 1)
     
     st.markdown("---")
     st.subheader("👨‍👩‍👧 监护人联动")
-    guardian_name = st.text_input("监护人姓名", placeholder="例如：张老师")
-    guardian_phone = st.text_input("监护人电话", placeholder="用于紧急通知")
-    guardian_email = st.text_input("监护人邮箱", placeholder="用于报告推送")
+    st.session_state["guardian_name"] = st.text_input("监护人姓名", placeholder="例如：张老师", value=st.session_state["guardian_name"])
+    st.session_state["guardian_phone"] = st.text_input("监护人电话", placeholder="用于紧急通知", value=st.session_state["guardian_phone"])
+    st.session_state["guardian_email"] = st.text_input("监护人邮箱", placeholder="用于报告推送", value=st.session_state["guardian_email"])
     
     st.markdown("---")
     st.subheader("📋 风险偏好")
-    risk_sensitivity = st.select_slider(
+    st.session_state["risk_sensitivity"] = st.select_slider(
         "预警灵敏度",
         options=["低", "中", "高"],
-        value="中"
+        value=st.session_state["risk_sensitivity"]
     )
     
     # 知识库更新状态模拟
@@ -275,6 +413,7 @@ with st.sidebar:
     st.caption("当前知识库条目: 12,384 条诈骗模式")
 
 # 主页面标题
+st.markdown('<div class="main-container">', unsafe_allow_html=True)
 st.markdown('<div class="main-header">🛡️ 多模态反诈智能助手</div>', unsafe_allow_html=True)
 st.markdown("基于多模态AI的实时反诈防护系统 | 支持文本、语音、图像联合分析")
 
@@ -287,6 +426,9 @@ input_data = {
     "audio": None,
     "image": None
 }
+
+audio_file = None
+image_file = None
 
 with col_text:
     st.subheader("📝 文本分析")
@@ -488,8 +630,8 @@ if analyze_btn:
                     text=input_data["text"],
                     audio_flag=input_data["audio"] is not None,
                     image_flag=input_data["image"] is not None,
-                    role=role,
-                    sensitivity=risk_sensitivity
+                    role=st.session_state["role"],
+                    sensitivity=st.session_state["risk_sensitivity"]
                 )
                 level = result["level"]
                 level_class = result["level_class"]
@@ -533,9 +675,9 @@ if analyze_btn:
         # 生成安全监测报告
         st.markdown("### 📄 安全监测报告")
         report_data = {
-            "用户角色": role,
-            "性别": gender,
-            "监护人": guardian_name if guardian_name else "未设置",
+            "用户角色": st.session_state["role"],
+            "性别": st.session_state["gender"],
+            "监护人": st.session_state["guardian_name"] if st.session_state["guardian_name"] else "未设置",
             "分析时间": result.get("timestamp", datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
             "风险等级": level,
             "诈骗类型": result.get("fraud_type", "未知类型"),
@@ -576,6 +718,8 @@ with col_guard3:
 
 st.markdown("---")
 st.markdown('<div class="footer">多模态反诈智能助手 | 基于AI的全民反诈防护体系 | 实时守护您的数字生活</div>', unsafe_allow_html=True)
+
+st.markdown('</div>', unsafe_allow_html=True)
 
 # 说明：本界面为前端演示版本，实际使用时需替换mock_analysis为真实API调用
 # 后端接口设计可参考：POST /api/analyze，接收text/audio/image，返回风险分析JSON
