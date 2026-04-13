@@ -7,7 +7,7 @@ import os
 
 from .config import settings
 from .database import init_db
-from .api import auth, analyze
+from .api import auth, analyze, admin
 
 # 配置日志
 logging.basicConfig(
@@ -69,6 +69,7 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 # 包含路由
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(analyze.router, prefix=settings.API_V1_PREFIX)
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")
