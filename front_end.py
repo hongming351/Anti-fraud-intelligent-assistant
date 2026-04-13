@@ -47,61 +47,94 @@ light_theme = """
     body {
         background-color: #f8f9fa;
         color: #333;
+        font-size: 14px;
     }
     .main-container {
         max-width: 800px;
         margin: 0 auto;
-        padding: 2rem;
+        padding: 1rem;
     }
     .auth-container {
         max-width: 400px;
-        margin: 5rem auto;
-        padding: 2rem;
+        margin: 2rem auto;
+        padding: 1.5rem;
         background: white;
-        border-radius: 1rem;
+        border-radius: 0.8rem;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
     }
     .main-header {
-        font-size: 2.5rem;
+        font-size: 1.8rem;
         color: #1E3A8A;
         text-align: center;
-        margin-bottom: 1rem;
+        margin-bottom: 0.8rem;
     }
     .risk-high {
         background-color: #FEE2E2;
         border-left: 5px solid #DC2626;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .risk-mid {
         background-color: #FEF3C7;
         border-left: 5px solid #F59E0B;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .risk-low {
         background-color: #E0F2FE;
         border-left: 5px solid #3B82F6;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .warning-box {
         background-color: #FFF1F0;
         border: 1px solid #FFCCC7;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
-        margin: 1rem 0;
+        margin: 0.8rem 0;
+        font-size: 14px;
     }
     .footer {
         text-align: center;
-        margin-top: 2rem;
+        margin-top: 1.5rem;
         color: #6B7280;
+        font-size: 12px;
     }
     .theme-toggle {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 10px;
+        right: 10px;
         z-index: 1000;
+    }
+    /* 调整Streamlit默认元素大小 */
+    .stTextInput > div > div > input {
+        font-size: 14px;
+        padding: 8px;
+    }
+    .stSelectbox > div > div > select {
+        font-size: 14px;
+        padding: 8px;
+    }
+    .stRadio > div {
+        font-size: 14px;
+    }
+    .stSlider > div {
+        font-size: 14px;
+    }
+    .stButton > button {
+        font-size: 14px;
+        padding: 8px 16px;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-size: 1.2rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    .stSubheader {
+        font-size: 1.1rem !important;
+        margin-bottom: 0.5rem !important;
     }
 </style>
 """
@@ -111,70 +144,107 @@ dark_theme = """
     body {
         background-color: #1e1e1e;
         color: #e0e0e0;
+        font-size: 14px;
     }
     .main-container {
         max-width: 800px;
         margin: 0 auto;
-        padding: 2rem;
+        padding: 1rem;
     }
     .auth-container {
         max-width: 400px;
-        margin: 5rem auto;
-        padding: 2rem;
+        margin: 2rem auto;
+        padding: 1.5rem;
         background: #2d2d2d;
-        border-radius: 1rem;
+        border-radius: 0.8rem;
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
     }
     .main-header {
-        font-size: 2.5rem;
+        font-size: 1.8rem;
         color: #64b5f6;
         text-align: center;
-        margin-bottom: 1rem;
+        margin-bottom: 0.8rem;
     }
     .risk-high {
         background-color: #4a1e1e;
         border-left: 5px solid #dc2626;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .risk-mid {
         background-color: #4a3a1e;
         border-left: 5px solid #f59e0b;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .risk-low {
         background-color: #1e2a4a;
         border-left: 5px solid #3b82f6;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
+        font-size: 14px;
     }
     .warning-box {
         background-color: #4a1e2a;
         border: 1px solid #ffccc7;
-        padding: 1rem;
+        padding: 0.8rem;
         border-radius: 0.5rem;
-        margin: 1rem 0;
+        margin: 0.8rem 0;
+        font-size: 14px;
     }
     .footer {
         text-align: center;
-        margin-top: 2rem;
+        margin-top: 1.5rem;
         color: #999;
+        font-size: 12px;
     }
     .theme-toggle {
         position: fixed;
-        top: 20px;
-        right: 20px;
+        top: 10px;
+        right: 10px;
         z-index: 1000;
     }
     input, textarea, select {
         background-color: #3d3d3d !important;
         color: #e0e0e0 !important;
         border: 1px solid #555 !important;
+        font-size: 14px !important;
+        padding: 8px !important;
     }
     button {
         background-color: #3b82f6 !important;
         color: white !important;
+        font-size: 14px !important;
+        padding: 8px 16px !important;
+    }
+    /* 调整Streamlit默认元素大小 */
+    .stTextInput > div > div > input {
+        font-size: 14px;
+        padding: 8px;
+    }
+    .stSelectbox > div > div > select {
+        font-size: 14px;
+        padding: 8px;
+    }
+    .stRadio > div {
+        font-size: 14px;
+    }
+    .stSlider > div {
+        font-size: 14px;
+    }
+    .stButton > button {
+        font-size: 14px;
+        padding: 8px 16px;
+    }
+    h1, h2, h3, h4, h5, h6 {
+        font-size: 1.2rem !important;
+        margin-bottom: 0.5rem !important;
+    }
+    .stSubheader {
+        font-size: 1.1rem !important;
+        margin-bottom: 0.5rem !important;
     }
 </style>
 """
@@ -438,6 +508,27 @@ if not st.session_state["access_token"]:
                 else:
                     st.error("注册失败，用户名或邮箱可能已被使用")
     
+    st.markdown('</div>', unsafe_allow_html=True)
+    st.stop()  # 停止执行后续代码
+
+# 已登录状态 - 显示侧边栏
+with st.sidebar:
+    st.image("https://img.icons8.com/color/96/000000/artificial-intelligence.png", width=60)
+    
+    # 用户信息
+    st.title("🔐 用户信息")
+    st.markdown("---")
+    
+    user_info = st.session_state["user_info"] or {}
+    st.success(f"✅ 已登录: {user_info.get('username', '用户')}")
+    st.caption(f"角色: {st.session_state['role']}")
+    st.caption(f"性别: {st.session_state['gender']}")
+    
+    if st.button("🚪 退出登录"):
+        st.session_state["access_token"] = None
+        st.session_state["user_info"] = None
+        st.rerun()
+    
     st.markdown("---")
     st.title("⚙️ 个性化设置")
     st.markdown("---")
@@ -447,22 +538,24 @@ if not st.session_state["access_token"]:
     st.session_state["role"] = st.selectbox(
         "选择您的身份",
         ["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"],
-        index=["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"].index(st.session_state["role"])
+        index=["儿童/青少年", "青年（学生/职场新人）", "中年（职场人士）", "老年人", "财务/高管（高风险）"].index(st.session_state["role"]),
+        key="sidebar_role"
     )
-    st.session_state["gender"] = st.radio("性别", ["男", "女"], horizontal=True, index=0 if st.session_state["gender"] == "男" else 1)
+    st.session_state["gender"] = st.radio("性别", ["男", "女"], horizontal=True, index=0 if st.session_state["gender"] == "男" else 1, key="sidebar_gender")
     
     st.markdown("---")
     st.subheader("👨‍👩‍👧 监护人联动")
-    st.session_state["guardian_name"] = st.text_input("监护人姓名", placeholder="例如：张老师", value=st.session_state["guardian_name"])
-    st.session_state["guardian_phone"] = st.text_input("监护人电话", placeholder="用于紧急通知", value=st.session_state["guardian_phone"])
-    st.session_state["guardian_email"] = st.text_input("监护人邮箱", placeholder="用于报告推送", value=st.session_state["guardian_email"])
+    st.session_state["guardian_name"] = st.text_input("监护人姓名", placeholder="例如：张老师", value=st.session_state["guardian_name"], key="sidebar_guardian_name")
+    st.session_state["guardian_phone"] = st.text_input("监护人电话", placeholder="用于紧急通知", value=st.session_state["guardian_phone"], key="sidebar_guardian_phone")
+    st.session_state["guardian_email"] = st.text_input("监护人邮箱", placeholder="用于报告推送", value=st.session_state["guardian_email"], key="sidebar_guardian_email")
     
     st.markdown("---")
     st.subheader("📋 风险偏好")
     st.session_state["risk_sensitivity"] = st.select_slider(
         "预警灵敏度",
         options=["低", "中", "高"],
-        value=st.session_state["risk_sensitivity"]
+        value=st.session_state["risk_sensitivity"],
+        key="sidebar_risk_sensitivity"
     )
     
     # 知识库更新状态 - 调用后端API获取真实数据

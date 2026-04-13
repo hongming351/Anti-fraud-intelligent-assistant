@@ -1,34 +1,37 @@
 # 后端依赖包
-fastapi==0.100.0
+fastapi>=0.115.0              # 原 0.100.0 过旧
 uvicorn[standard]==0.23.2
 sqlalchemy==2.0.23
 alembic==1.12.1
-pydantic==2.3.0
-pydantic-settings==2.0.3
+pydantic>=2.10.0              # 原 2.3.0 过旧，会拉取兼容的 pydantic-core
+pydantic-settings>=2.5.0      # 原 2.0.3 过旧
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
 python-multipart==0.0.6
 python-dotenv==1.0.0
 
-# AI/ML 相关（Python3.8 兼容）
-transformers==4.33.3
-torch==2.0.1
-torchvision==0.15.2
-torchaudio==2.0.2
-scikit-learn==1.2.2
-pandas==2.0.3
-numpy==1.24.3
+# AI/ML 相关（Python 3.14 兼容）
+transformers>=4.46.0          # 原 4.33.3 可能 tokenizers 编译失败
+torch>=2.9.0
+torchvision>=0.24.0
+torchaudio>=2.9.0
+scikit-learn>=1.6.0
+numpy>=1.26.0
+pandas>=2.2.0
 
 # 语音处理
 speechrecognition==3.10.0
 pydub==0.25.1
+
 # 图像处理
-opencv-python==4.8.1.78
-pillow==9.5.0
+opencv-python>=4.9.0
+Pillow>=10.0.0
 pytesseract==0.3.10
+
 # 异步任务
 celery==5.3.4
 redis==5.0.1
+
 # 测试
 pytest==7.4.3
 pytest-asyncio==0.21.1
@@ -38,6 +41,7 @@ httpx==0.24.1
 black==23.3.0
 isort==5.12.0
 flake8==6.1.0
+
 # LLM API 依赖
 openai>=0.27.0
 dashscope>=1.0.0
