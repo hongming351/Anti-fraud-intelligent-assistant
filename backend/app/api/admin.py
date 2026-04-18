@@ -6,7 +6,7 @@ import os
 import sys
 from datetime import datetime
 from pydantic import BaseModel, Field
-
+from app.services.auto_updater import update_knowledge_base_job
 from .. import schemas, crud
 from ..database import get_db
 from ..dependencies import get_current_user
@@ -191,7 +191,17 @@ def get_knowledge_base_stats(
         cases_by_type = {}
         cases_by_risk_level = {"low": 0, "medium": 0, "high": 0}
         
-        last_updated = datetime.now()
+        # 读取真实的最后更新时间（由 auto_updater 写入）
+        last_update_file = os.path.join(os.path.dirname(__file__), "../services/last_update.txt")
+        if os.path.exists(last_update_file):
+            try:
+                with open(last_update_file, "r") as f:
+                    last_updated_str = f.read().strip()
+                    last_updated = datetime.fromisoformat(last_updated_str)
+            except Exception:
+                last_updated = datetime.now()
+        else:
+            last_updated = datetime.now()
         
         return KnowledgeBaseStats(
             total_cases=total_count,
@@ -289,21 +299,20 @@ def get_system_status(
 def manual_update_knowledge_base(
     current_user: schemas.UserResponse = Depends(require_admin)
 ):
-    """手动触发知识库更新"""
+    """手动触发知识库更新（调用自动化爬虫与入库任务）"""
     try:
-        # 这里可以添加实际的知识库更新逻辑
-        # 例如：从外部API获取最新案例、重新训练模型等
+        # 调用真正的更新任务
+        result = update_knowledge_base_job()
         
-        import time
-        time.sleep(1)  # 模拟处理时间
-        
+        # 获取更新后的统计信息
         stats = get_knowledge_base_stats(current_user)
         
         return {
             "message": "知识库更新成功",
             "updated_at": datetime.now().isoformat(),
             "total_cases": stats.total_cases,
-            "details": "已同步最新诈骗案例库，模型已重新训练"
+            "details": result.get("details", "已同步最新诈骗案例库"),
+            "new_cases": result.get("new_count", 0)
         }
     except Exception as e:
         raise HTTPException(

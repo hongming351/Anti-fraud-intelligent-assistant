@@ -5,6 +5,11 @@ import time
 import sys
 from openai import OpenAI
 from typing import Dict, Optional
+import tempfile
+from pydub import AudioSegment
+from dotenv import load_dotenv
+
+load_dotenv(r'D:\Anti-fraud-intelligent-assistant\backend\.env')
 
 # 添加当前目录到路径以便导入本地模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -23,14 +28,14 @@ import whisper
 
 # ---------- 初始化大模型客户端 ----------
 client = OpenAI(
-    api_key="sk-5a37562a35fb4f8e9cfa79007314b2ce",
+    api_key="sk-d195c3a4935f4b6e87360817aed84f72",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
 # 图片分析使用的多模态模型
 IMAGE_MODEL = "qwen2.5-vl-32b-instruct"
 # 文本分析使用的纯文本模型
-TEXT_MODEL = "qwen-max"
+TEXT_MODEL = "qwen-turbo"
 
 # ---------- Whisper 模型下载配置 ----------
 WHISPER_MODEL_URLS = {
@@ -69,7 +74,8 @@ def load_whisper_model(model_name: str = "base"):
         print("使用默认方式加载模型...")
         return whisper.load_model(model_name)
 
-WHISPER_MODEL = load_whisper_model("base")
+# 将 Whisper 模型从 base 换为 tiny（加速音频转写，牺牲少量准确率）
+WHISPER_MODEL = load_whisper_model("tiny")
 
 # ================== 图片分析 ==================
 def analyze_image(image_input, demographic: UserDemographic = UserDemographic.ADULT, retry=2) -> Dict:
@@ -159,28 +165,78 @@ def _prepare_image_url(image_input) -> Optional[str]:
         return image_input
     return None
 
-# ================== 音频处理 ==================
 def transcribe_audio(audio_path: str) -> str:
+    """
+    将音频转换为 16kHz 单声道 WAV 后调用阿里云语音识别
+    """
+    import time
+    total_start = time.time()
     try:
-        result = WHISPER_MODEL.transcribe(audio_path, language="zh", task="transcribe", temperature=0.0)
-        return result["text"]
+        print(f"[音频处理] 开始处理: {audio_path}")
+        
+        # 1. 加载原始音频
+        load_start = time.time()
+        audio = AudioSegment.from_file(audio_path)
+        load_elapsed = time.time() - load_start
+        print(f"[音频处理] 加载音频耗时: {load_elapsed:.2f}s，时长: {len(audio)/1000:.2f}s")
+        
+        # 2. 转换为单声道，采样率 16000 Hz
+        convert_start = time.time()
+        audio = audio.set_channels(1).set_frame_rate(16000)
+        convert_elapsed = time.time() - convert_start
+        print(f"[音频处理] 声道/采样率转换耗时: {convert_elapsed:.2f}s")
+        
+        # 3. 保存到临时 WAV 文件
+        export_start = time.time()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            temp_wav = tmp_file.name
+        audio.export(temp_wav, format="wav")
+        export_elapsed = time.time() - export_start
+        print(f"[音频处理] 导出WAV耗时: {export_elapsed:.2f}s，临时文件: {temp_wav}")
+        
+        # 4. 调用阿里云识别
+        from .audio_recognizer import recognize_audio
+        print("[音频处理] 正在调用阿里云 Fun-ASR 识别...")
+        asr_start = time.time()
+        text = recognize_audio(temp_wav)
+        asr_elapsed = time.time() - asr_start
+        print(f"[音频处理] 阿里云识别耗时: {asr_elapsed:.2f}s")
+        
+        # 5. 删除临时文件
+        os.unlink(temp_wav)
+        
+        total_elapsed = time.time() - total_start
+        print(f"[音频处理] 总耗时: {total_elapsed:.2f}s (加载:{load_elapsed:.2f} 转换:{convert_elapsed:.2f} 导出:{export_elapsed:.2f} ASR:{asr_elapsed:.2f})")
+        
+        if text:
+            print(f"[音频处理] 识别成功，文本长度: {len(text)}")
+        else:
+            print("[音频处理] 识别结果为空")
+        return text
     except Exception as e:
-        print(f"音频转写失败: {e}")
+        print(f"[音频处理] 转写失败: {e}")
         return ""
 
-# ================== 核心：带向量检索和人群差异化的文本分析 ==================
+import time
+
 def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
     """
     分析文本内容中的诈骗风险（集成向量检索和人群差异化阈值）
     """
+    total_start = time.time()
+    
     # 1. 从向量库检索相似案例
+    retrieval_start = time.time()
     similar_cases = []
     try:
-        similar_cases = search_similar_cases(text, top_k=3)
+        similar_cases = search_similar_cases(text, top_k=2)
     except Exception as e:
         print(f"向量检索失败: {e}，将不使用检索增强")
+    retrieval_elapsed = time.time() - retrieval_start
+    print(f"[文本分析] 向量检索耗时: {retrieval_elapsed:.2f}s (返回 {len(similar_cases)} 条)")
 
     # 2. 构建检索上下文
+    context_start = time.time()
     context = ""
     if similar_cases:
         context = "\n\n【参考相似案例（从反诈知识库检索）】\n"
@@ -188,13 +244,19 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
             case_text = case['text'][:200] + "..." if len(case['text']) > 200 else case['text']
             context += f"{i+1}. {case_text}\n"
             context += f"   类型: {case.get('type', '未知')} | 相似度: {case['similarity_score']:.2f}\n\n"
+    context_elapsed = time.time() - context_start
+    print(f"[文本分析] 构建上下文耗时: {context_elapsed:.4f}s")
 
-    # 3. 使用统一的系统提示词，并附加检索上下文
+    # 3. 构建系统提示词
+    prompt_start = time.time()
     base_prompt = FRAUD_SYSTEM_PROMPT
     system_prompt = base_prompt + context
-
     user_prompt = f"请分析以下文本：\n{text}"
+    prompt_elapsed = time.time() - prompt_start
+    print(f"[文本分析] 构建提示词耗时: {prompt_elapsed:.4f}s")
 
+    # 4. 调用大模型
+    llm_start = time.time()
     try:
         completion = client.chat.completions.create(
             model=TEXT_MODEL,
@@ -205,6 +267,9 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
             temperature=0.1,
             response_format={"type": "json_object"}
         )
+        llm_elapsed = time.time() - llm_start
+        print(f"[文本分析] 大模型调用耗时: {llm_elapsed:.2f}s")
+        
         raw = completion.choices[0].message.content
         result = json.loads(raw)
 
@@ -216,6 +281,7 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
         advice = result.get("advice", "")
 
         # 人群差异化调整
+        adjust_start = time.time()
         adjusted_risk_level, adjusted_confidence = adjust_confidence_by_demographic(
             confidence, risk_level, demographic
         )
@@ -223,6 +289,8 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
         if should_escalate_for_demographic(fraud_type, demographic, suspicious_keywords):
             adjusted_risk_level = "high"
             adjusted_confidence = max(adjusted_confidence, 0.9)
+        adjust_elapsed = time.time() - adjust_start
+        print(f"[文本分析] 人群调整耗时: {adjust_elapsed:.4f}s")
 
         response = {
             "success": True,
@@ -240,11 +308,18 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
         }
         if similar_cases:
             response["retrieved_cases"] = similar_cases
-        return response
     except Exception as e:
+        print(f"[文本分析] 大模型调用异常: {e}")
         return _error_result(f"文本分析失败: {str(e)}")
+    
+    total_elapsed = time.time() - total_start
+    print(f"[文本分析] 总耗时: {total_elapsed:.2f}s (检索:{retrieval_elapsed:.2f} 上下文:{context_elapsed:.2f} 提示词:{prompt_elapsed:.2f} LLM:{llm_elapsed:.2f})")
+    
+    return response
 
 def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographic.ADULT, retry: int = 2) -> Dict:
+    import time
+    start = time.time()
     text = ""
     for attempt in range(retry + 1):
         text = transcribe_audio(audio_path)
@@ -254,7 +329,13 @@ def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographi
             time.sleep(1)
     if not text:
         return _error_result("音频转写失败或音频内容为空")
-    return analyze_text_for_fraud(text, demographic)
+    transcribe_time = time.time()
+    print(f"[音频分析] 转写耗时: {transcribe_time - start:.2f}s")
+    
+    result = analyze_text_for_fraud(text, demographic)
+    total = time.time() - start
+    print(f"[音频分析] 总耗时: {total:.2f}s (其中文本分析: {total - (transcribe_time - start):.2f}s)")
+    return result
 
 def analyze_text(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
     return analyze_text_for_fraud(text, demographic)

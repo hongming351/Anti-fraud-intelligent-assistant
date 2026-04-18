@@ -54,7 +54,7 @@ if auth_tab == "登录":
     login_username = st.text_input("用户名", key="login_username")
     login_password = st.text_input("密码", type="password", key="login_password")
 
-    if st.button("登录", type="primary", use_container_width=True):
+    if st.button("登录", type="primary", width='stretch'):
         if login_username and login_password:
             with st.spinner("登录中..."):
                 if login_user(login_username, login_password):
@@ -95,7 +95,7 @@ else:  # 注册
     reg_guardian_phone = st.text_input("监护人电话", placeholder="用于紧急通知", key="reg_guardian_phone")
     reg_guardian_email = st.text_input("监护人邮箱", placeholder="用于报告推送", key="reg_guardian_email")
 
-    if st.button("注册", type="primary", use_container_width=True):
+    if st.button("注册", type="primary", width='stretch'):
         if not reg_username or not reg_email or not reg_password:
             st.warning("请填写所有必填字段")
         elif reg_password != reg_confirm_password:

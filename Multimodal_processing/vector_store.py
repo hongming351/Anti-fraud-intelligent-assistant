@@ -65,7 +65,7 @@ if os.path.exists(json_path):
     fraud_records = load_fraud_data_from_json(json_path)
     print(f"加载了 {len(fraud_records)} 条反诈案例")
 else:
-    print(f"文件 {json_path} 不存在，请检查路径")
+    # print(f"文件 {json_path} 不存在，请检查路径")
     fraud_records = []
 
 # ================== 5. 添加手动录入的反诈法律法规 ==================

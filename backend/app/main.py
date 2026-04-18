@@ -4,10 +4,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
 import os
-
+from apscheduler.schedulers.background import BackgroundScheduler
 from .config import settings
 from .database import init_db
 from .api import auth, analyze, admin
+
+# 导入定时任务函数
+from app.services.auto_updater import update_knowledge_base_job
 
 # 配置日志
 logging.basicConfig(
@@ -16,6 +19,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 创建调度器实例
+scheduler = BackgroundScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -36,12 +41,26 @@ async def lifespan(app: FastAPI):
     os.makedirs(os.path.join(settings.UPLOAD_DIR, "image"), exist_ok=True)
     logger.info(f"上传目录已创建: {settings.UPLOAD_DIR}")
     
+    # ---------- 启动定时任务 ----------
+    # 每天凌晨3点执行一次
+    scheduler.add_job(
+        update_knowledge_base_job,
+        'cron',
+        hour=3,
+        minute=0,
+        id='auto_update_knowledge',
+        replace_existing=True
+    )
+    scheduler.start()
+    logger.info("定时任务调度器已启动，每天凌晨3:00自动更新知识库")
+    
     logger.info(f"服务已启动，访问 http://localhost:8000/docs 查看API文档")
     
     yield  # 应用运行期间
     
     # 关闭时执行
     logger.info("关闭反诈智能助手后端服务...")
+    scheduler.shutdown()  # 关闭调度器
 
 
 # 创建FastAPI应用

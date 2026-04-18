@@ -276,6 +276,43 @@ def mock_analysis(
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     }
 
+def manual_update_knowledge_base() -> Optional[Dict[str, Any]]:
+    """
+    手动触发知识库更新
+    Returns:
+        更新结果字典，包含 total_cases, new_cases 等，失败返回 None
+    """
+    try:
+        url = f"{BACKEND_URL}{API_PREFIX}/admin/knowledge/update"
+        headers = get_auth_headers()
+        response = requests.post(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            st.error(f"知识库更新失败: HTTP {response.status_code}")
+            try:
+                error_detail = response.json().get("detail", response.text)
+                st.error(f"错误详情: {error_detail}")
+            except:
+                pass
+            return None
+    except Exception as e:
+        st.error(f"更新请求异常: {e}")
+        return None
+    
+def get_knowledge_base_stats() -> Optional[Dict[str, Any]]:
+    """获取知识库统计信息"""
+    try:
+        url = f"{BACKEND_URL}{API_PREFIX}/admin/knowledge/stats"
+        headers = get_auth_headers()
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            return response.json()
+        else:
+            return None
+    except Exception:
+        return None
+    
 def logout():
     """退出登录"""
     st.session_state["access_token"] = None
