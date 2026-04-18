@@ -7,7 +7,7 @@ import streamlit as st
 import time
 import pandas as pd
 from datetime import datetime
-
+from frontend.utils.api import BACKEND_URL, get_auth_headers, manual_update_knowledge_base
 try:
     # 尝试绝对导入
     from frontend.components.theme import apply_theme, init_theme_state, render_theme_toggle
@@ -90,11 +90,39 @@ with st.sidebar:
         key="sidebar_risk_sensitivity"
     )
 
-    # 知识库更新状态模拟
+    # 知识库更新状态
     st.markdown("---")
     st.subheader("📚 知识库状态")
-    st.progress(0.85, text="最新诈骗模式库已更新")
-    st.caption("每周自动更新诈骗案例库")
+
+    # 显示当前知识库统计（可选，从后端获取真实数据）
+    try:
+        from frontend.utils.api import get_auth_headers
+        import requests
+        headers = get_auth_headers()
+        stats_resp = requests.get(f"{BACKEND_URL}{API_PREFIX}/admin/knowledge/stats", headers=headers)
+        if stats_resp.status_code == 200:
+            stats = stats_resp.json()
+            st.metric("知识库案例总数", stats.get("total_cases", 0))
+            st.caption(f"最后更新: {stats.get('last_updated', '未知')[:19]}")
+        else:
+            st.progress(0.85, text="最新诈骗模式库已更新")
+            st.caption("每周自动更新诈骗案例库")
+    except:
+        st.progress(0.85, text="最新诈骗模式库已更新")
+        st.caption("每周自动更新诈骗案例库")
+
+    # 手动更新按钮
+    if st.button("🔄 手动更新知识库", key="manual_update_btn"):
+        with st.spinner("正在同步最新诈骗案例..."):
+            from frontend.utils.api import manual_update_knowledge_base
+            result = manual_update_knowledge_base()
+            if result:
+                st.success(f"知识库更新成功！新增 {result.get('new_cases', 0)} 条案例，总计 {result.get('total_cases', 0)} 条。")
+                st.caption(f"更新时间: {result.get('updated_at', '')}")
+                # 可选：刷新页面以更新显示
+                st.rerun()
+            else:
+                st.error("知识库更新失败，请检查后端服务。")
 
 # 主内容区
 st.markdown('<div class="main-container">', unsafe_allow_html=True)
@@ -157,7 +185,7 @@ with st.expander("🔍 高级分析选项"):
 
 # 分析按钮
 st.markdown("---")
-if st.button("🔍 立即智能分析", type="primary", use_container_width=True):
+if st.button("🔍 立即智能分析", type="primary", width='stretch'):
     if not text_input and not audio_file and not image_file:
         st.warning("请至少输入一种模态的数据（文本、音频或图片）")
     else:
@@ -251,7 +279,7 @@ if st.button("🔍 立即智能分析", type="primary", use_container_width=True
                 }
 
                 report_df = pd.DataFrame(report_data)
-                st.dataframe(report_df, use_container_width=True)
+                st.dataframe(report_df, width='stretch')
 
                 # 下载报告
                 csv = report_df.to_csv(index=False)
@@ -260,7 +288,7 @@ if st.button("🔍 立即智能分析", type="primary", use_container_width=True
                     data=csv,
                     file_name=f"反诈分析报告_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
                     mime="text/csv",
-                    use_container_width=True
+                    width='stretch'
                 )
 
                 # 实时预警机制
@@ -273,7 +301,7 @@ if st.button("🔍 立即智能分析", type="primary", use_container_width=True
                         st.warning("**高危预警**: 已触发自动防护机制，建议立即采取措施")
                         if st.session_state["guardian_phone"] or st.session_state["guardian_email"]:
                             st.info("监护人通知已准备就绪")
-                        if st.button("🆘 一键紧急求助", type="secondary", use_container_width=True):
+                        if st.button("🆘 一键紧急求助", type="secondary", width='stretch'):
                             st.success("紧急求助信号已发送，请保持通讯畅通")
                     else:
                         st.info("**中危预警**: 系统已记录此事件，建议密切关注")

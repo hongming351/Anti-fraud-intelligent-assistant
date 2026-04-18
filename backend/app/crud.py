@@ -3,7 +3,9 @@ from sqlalchemy import func, desc
 from typing import Optional, List
 from datetime import datetime, timedelta
 import logging
-
+from sqlalchemy import func, and_
+from datetime import datetime, timedelta
+from typing import Dict, Any
 from . import models, schemas
 from .security import get_password_hash, verify_password
 
@@ -323,3 +325,45 @@ def create_system_log(
     db.commit()
     db.refresh(log)
     return log
+
+
+def get_user_behavior_profile(db: Session, user_id: int, recent_limit: int = 10) -> Dict[str, Any]:
+    """
+    获取用户行为画像，包括最近N次的风险统计和诈骗类型频率。
+    返回：
+        - avg_risk_score: 平均风险分数
+        - high_risk_count: 最近高危次数
+        - fraud_type_counts: 各诈骗类型出现次数（字典）
+        - last_analysis_time: 最近一次分析时间
+    """
+    # 查询最近 recent_limit 条分析记录（按时间倒序）
+    records = db.query(models.AnalysisRecord).filter(
+        models.AnalysisRecord.user_id == user_id
+    ).order_by(models.AnalysisRecord.created_at.desc()).limit(recent_limit).all()
+    
+    if not records:
+        return {
+            "avg_risk_score": 0.0,
+            "high_risk_count": 0,
+            "fraud_type_counts": {},
+            "last_analysis_time": None
+        }
+    
+    total_score = 0.0
+    high_count = 0
+    fraud_counts = {}
+    for r in records:
+        total_score += r.risk_score
+        if r.risk_level == "high":
+            high_count += 1
+        if r.fraud_type:
+            fraud_counts[r.fraud_type] = fraud_counts.get(r.fraud_type, 0) + 1
+    
+    avg_score = total_score / len(records)
+    
+    return {
+        "avg_risk_score": avg_score,
+        "high_risk_count": high_count,
+        "fraud_type_counts": fraud_counts,
+        "last_analysis_time": records[0].created_at
+    }

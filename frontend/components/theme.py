@@ -7,6 +7,11 @@
 LIGHT_THEME_CSS = """
 <style>
     body {
+        background-image: url('../static/background.jpeg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        background-repeat: no-repeat;
         background-color: #f8f9fa;
         color: #333;
         font-size: 14px;
@@ -105,6 +110,11 @@ LIGHT_THEME_CSS = """
 DARK_THEME_CSS = """
 <style>
     body {
+        background-image: url('../static/background.jpeg');
+        background-size: cover;
+        background-position: center;
+        background-attachment: fixed;
+        background-repeat: no-repeat;
         background-color: #1e1e1e;
         color: #e0e0e0;
         font-size: 14px;

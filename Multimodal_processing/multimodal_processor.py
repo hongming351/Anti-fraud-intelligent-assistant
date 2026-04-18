@@ -2,28 +2,42 @@ import os
 import json
 import base64
 import time
+import sys
 from openai import OpenAI
 from typing import Dict, Optional
+import tempfile
+from pydub import AudioSegment
+from dotenv import load_dotenv
+
+load_dotenv(r'D:\Anti-fraud-intelligent-assistant\backend\.env')
+
+# 添加当前目录到路径以便导入本地模块
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from .vector_store import search_similar_cases
+from .prompt_config import (
+    UserDemographic,
+    FRAUD_SYSTEM_PROMPT,
+    adjust_confidence_by_demographic,
+    should_escalate_for_demographic,
+)
 
 # 设置 HuggingFace 国内镜像
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
 
-# 导入 Whisper（需要已安装 openai-whisper）
 import whisper
 
 # ---------- 初始化大模型客户端 ----------
 client = OpenAI(
-    api_key="sk-5a37562a35fb4f8e9cfa79007314b2ce",
+    api_key="sk-d195c3a4935f4b6e87360817aed84f72",
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
 # 图片分析使用的多模态模型
 IMAGE_MODEL = "qwen2.5-vl-32b-instruct"
 # 文本分析使用的纯文本模型
-TEXT_MODEL = "qwen-max"
+TEXT_MODEL = "qwen-turbo"
 
 # ---------- Whisper 模型下载配置 ----------
-# 国内镜像地址
 WHISPER_MODEL_URLS = {
     "tiny": "https://hf-mirror.com/openai/whisper-tiny/resolve/main/tiny.pt",
     "base": "https://hf-mirror.com/openai/whisper-base/resolve/main/base.pt",
@@ -33,23 +47,16 @@ WHISPER_MODEL_URLS = {
 }
 
 def _download_whisper_model(model_name: str = "base", download_root: str = None) -> str:
-    """下载 Whisper 模型使用国内镜像"""
     import urllib.request
-    
     if download_root is None:
         download_root = os.path.join(os.path.expanduser("~"), ".cache", "whisper")
-    
     os.makedirs(download_root, exist_ok=True)
-    
     model_url = WHISPER_MODEL_URLS.get(model_name)
     if not model_url:
         model_url = f"https://openaipublic.azureedge.net/main/whisper/models/{model_name}.pt"
-    
     model_path = os.path.join(download_root, f"{model_name}.pt")
-    
     if os.path.exists(model_path):
         return model_path
-    
     print(f"正在从国内镜像下载 Whisper {model_name} 模型...")
     try:
         urllib.request.urlretrieve(model_url, model_path)
@@ -60,7 +67,6 @@ def _download_whisper_model(model_name: str = "base", download_root: str = None)
         return None
 
 def load_whisper_model(model_name: str = "base"):
-    """加载 Whisper 模型"""
     model_path = _download_whisper_model(model_name)
     if model_path and os.path.exists(model_path):
         return whisper.load_model(model_path, download_root=None)
@@ -68,51 +74,28 @@ def load_whisper_model(model_name: str = "base"):
         print("使用默认方式加载模型...")
         return whisper.load_model(model_name)
 
-# ---------- 初始化 Whisper 音频转文字模型 ----------
-WHISPER_MODEL = load_whisper_model("base")
+# 将 Whisper 模型从 base 换为 tiny（加速音频转写，牺牲少量准确率）
+WHISPER_MODEL = load_whisper_model("tiny")
 
-# ================== 图片分析部分（已有） ==================
-
-def analyze_image(image_input, retry=2) -> Dict:
+# ================== 图片分析 ==================
+def analyze_image(image_input, demographic: UserDemographic = UserDemographic.ADULT, retry=2) -> Dict:
     """
-    分析图片中的诈骗风险，返回结构化结果
-    
-    Args:
-        image_input: 本地图片路径、图片URL或base64字符串
-        retry: 失败重试次数
-    
-    Returns:
-        Dict: 包含 success, risk_level, fraud_type, extracted_text,
-              has_qrcode, has_link, has_contact_info, suspicious_keywords, reason
+    分析图片中的诈骗风险，返回结构化结果，支持人群差异化阈值
     """
     image_url = _prepare_image_url(image_input)
     if not image_url:
         return _error_result("无法识别图片格式，请提供路径/URL/base64")
 
-    system_prompt = """你是一个反诈专家。请分析用户提供的图片，判断是否涉及诈骗风险。
-严格按照JSON格式输出，不要添加任何其他内容。示例：
-{
-    "risk_level": "high",
-    "fraud_type": "刷单诈骗",
-    "extracted_text": "图片中的所有文字内容",
-    "has_qrcode": true,
-    "has_link": true,
-    "has_contact_info": true,
-    "suspicious_keywords": ["垫付", "佣金", "日赚"],
-    "reason": "图片中包含垫付返利等典型刷单诈骗关键词"
-}
-风险等级说明：
-- high: 明显诈骗（如转账二维码、刷单、投资陷阱）
-- medium: 可疑（如不明链接、诱导加好友）
-- low: 轻微可疑但不确定
-- safe: 完全正常
-诈骗类型可选：刷单诈骗、杀猪盘、冒充公检法、虚假贷款、投资理财诈骗、游戏交易诈骗、追星诈骗、养生保健品诈骗、AI换脸诈骗、其他
-"""
+    # 使用统一的系统提示词（可附加检索案例，但图片分析暂不强制检索）
+    system_prompt = FRAUD_SYSTEM_PROMPT
 
-    user_prompt = """请分析这张图片，输出JSON。重点关注：
-- 是否有二维码/链接/联系方式
-- 是否包含诱导转账、高额回报、紧急处理等话术
-- 提取所有可见文字"""
+    user_prompt = """请分析这张图片中的诈骗风险，严格按照JSON格式输出结果。重点关注：
+1. 是否有二维码、转账二维码、收款码
+2. 是否包含"立即转账"、"扫码支付"、"垫付"等明确支付指令
+3. 是否宣传"高收益"、"保本保收益"、"日赚"等虚假承诺
+4. 是否存在虚假身份冒充（如冒充官方、警方、客服等）
+5. 提取所有可见文字并识别诈骗关键词
+"""
 
     for attempt in range(retry + 1):
         try:
@@ -133,16 +116,44 @@ def analyze_image(image_input, retry=2) -> Dict:
             )
             raw = completion.choices[0].message.content
             result = json.loads(raw)
-            result["success"] = True
-            result["raw_response"] = raw
-            return result
+            # 确保结果包含必要字段
+            risk_level = result.get("risk_level", "unknown")
+            confidence = result.get("confidence", 0.5)
+            fraud_type = result.get("fraud_type", "")
+            suspicious_keywords = result.get("suspicious_keywords", [])
+            reason = result.get("reason", "")
+            advice = result.get("advice", "")
+
+            # 人群差异化调整
+            adjusted_risk_level, adjusted_confidence = adjust_confidence_by_demographic(
+                confidence, risk_level, demographic
+            )
+            # 检查是否需要强制升级
+            if should_escalate_for_demographic(fraud_type, demographic, suspicious_keywords):
+                adjusted_risk_level = "high"
+                adjusted_confidence = max(adjusted_confidence, 0.9)
+
+            response = {
+                "success": True,
+                "risk_level": adjusted_risk_level,
+                "fraud_type": fraud_type,
+                "extracted_text": result.get("extracted_text", ""),
+                "has_qrcode": result.get("has_qrcode", False),
+                "has_link": result.get("has_link", False),
+                "has_contact_info": result.get("has_contact_info", False),
+                "suspicious_keywords": suspicious_keywords,
+                "reason": reason,
+                "advice": advice,
+                "confidence": adjusted_confidence,
+                "raw_response": raw,
+            }
+            return response
         except Exception as e:
             if attempt == retry:
                 return _error_result(f"调用失败: {str(e)}")
             time.sleep(1)
 
 def _prepare_image_url(image_input) -> Optional[str]:
-    """将各种输入转为图片URL或base64 data URL"""
     if isinstance(image_input, str) and (image_input.startswith("http://") or image_input.startswith("https://")):
         return image_input
     if isinstance(image_input, str) and os.path.isfile(image_input):
@@ -154,53 +165,98 @@ def _prepare_image_url(image_input) -> Optional[str]:
         return image_input
     return None
 
-# ================== 音频处理模块（新增） ==================
-
 def transcribe_audio(audio_path: str) -> str:
     """
-    将音频文件转成文字（使用 Whisper）
-    
-    Args:
-        audio_path: 音频文件路径（支持 mp3, wav, m4a, flac 等）
-    
-    Returns:
-        转写出的文字内容，失败返回空字符串
+    将音频转换为 16kHz 单声道 WAV 后调用阿里云语音识别
     """
+    import time
+    total_start = time.time()
     try:
-        result = WHISPER_MODEL.transcribe(
-            audio_path,
-            language="zh",      # 指定中文，提高准确率
-            task="transcribe",  # 直接转写，不翻译
-            temperature=0.0     # 越低结果越确定
-        )
-        return result["text"]
+        print(f"[音频处理] 开始处理: {audio_path}")
+        
+        # 1. 加载原始音频
+        load_start = time.time()
+        audio = AudioSegment.from_file(audio_path)
+        load_elapsed = time.time() - load_start
+        print(f"[音频处理] 加载音频耗时: {load_elapsed:.2f}s，时长: {len(audio)/1000:.2f}s")
+        
+        # 2. 转换为单声道，采样率 16000 Hz
+        convert_start = time.time()
+        audio = audio.set_channels(1).set_frame_rate(16000)
+        convert_elapsed = time.time() - convert_start
+        print(f"[音频处理] 声道/采样率转换耗时: {convert_elapsed:.2f}s")
+        
+        # 3. 保存到临时 WAV 文件
+        export_start = time.time()
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
+            temp_wav = tmp_file.name
+        audio.export(temp_wav, format="wav")
+        export_elapsed = time.time() - export_start
+        print(f"[音频处理] 导出WAV耗时: {export_elapsed:.2f}s，临时文件: {temp_wav}")
+        
+        # 4. 调用阿里云识别
+        from .audio_recognizer import recognize_audio
+        print("[音频处理] 正在调用阿里云 Fun-ASR 识别...")
+        asr_start = time.time()
+        text = recognize_audio(temp_wav)
+        asr_elapsed = time.time() - asr_start
+        print(f"[音频处理] 阿里云识别耗时: {asr_elapsed:.2f}s")
+        
+        # 5. 删除临时文件
+        os.unlink(temp_wav)
+        
+        total_elapsed = time.time() - total_start
+        print(f"[音频处理] 总耗时: {total_elapsed:.2f}s (加载:{load_elapsed:.2f} 转换:{convert_elapsed:.2f} 导出:{export_elapsed:.2f} ASR:{asr_elapsed:.2f})")
+        
+        if text:
+            print(f"[音频处理] 识别成功，文本长度: {len(text)}")
+        else:
+            print("[音频处理] 识别结果为空")
+        return text
     except Exception as e:
-        print(f"音频转写失败: {e}")
+        print(f"[音频处理] 转写失败: {e}")
         return ""
 
-def analyze_text_for_fraud(text: str) -> Dict:
-    """
-    分析文本内容中的诈骗风险（供音频模块复用）
-    
-    Args:
-        text: 待分析的文本内容
-    
-    Returns:
-        与 analyze_image 相同格式的字典
-    """
-    system_prompt = """你是一个反诈专家。分析以下文本是否涉及诈骗，严格按照JSON格式输出。
-诈骗类型可选：["刷单诈骗","冒充客服退款诈骗","杀猪盘", "冒充公检法", "虚假贷款", "投资理财诈骗", "游戏交易诈骗", "追星诈骗", "养生保健品诈骗", "AI换脸诈骗", "虚假中奖诈骗", "无诈骗"]
+import time
 
-输出格式：
-{
-    "risk_level": "high/medium/low/safe",
-    "fraud_type": "从上面枚举中选择",
-    "suspicious_keywords": ["关键词1", "关键词2"],
-    "reason": "判断理由"
-}
-"""
-    user_prompt = f"请分析以下文本：{text}"
+def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
+    """
+    分析文本内容中的诈骗风险（集成向量检索和人群差异化阈值）
+    """
+    total_start = time.time()
     
+    # 1. 从向量库检索相似案例
+    retrieval_start = time.time()
+    similar_cases = []
+    try:
+        similar_cases = search_similar_cases(text, top_k=2)
+    except Exception as e:
+        print(f"向量检索失败: {e}，将不使用检索增强")
+    retrieval_elapsed = time.time() - retrieval_start
+    print(f"[文本分析] 向量检索耗时: {retrieval_elapsed:.2f}s (返回 {len(similar_cases)} 条)")
+
+    # 2. 构建检索上下文
+    context_start = time.time()
+    context = ""
+    if similar_cases:
+        context = "\n\n【参考相似案例（从反诈知识库检索）】\n"
+        for i, case in enumerate(similar_cases):
+            case_text = case['text'][:200] + "..." if len(case['text']) > 200 else case['text']
+            context += f"{i+1}. {case_text}\n"
+            context += f"   类型: {case.get('type', '未知')} | 相似度: {case['similarity_score']:.2f}\n\n"
+    context_elapsed = time.time() - context_start
+    print(f"[文本分析] 构建上下文耗时: {context_elapsed:.4f}s")
+
+    # 3. 构建系统提示词
+    prompt_start = time.time()
+    base_prompt = FRAUD_SYSTEM_PROMPT
+    system_prompt = base_prompt + context
+    user_prompt = f"请分析以下文本：\n{text}"
+    prompt_elapsed = time.time() - prompt_start
+    print(f"[文本分析] 构建提示词耗时: {prompt_elapsed:.4f}s")
+
+    # 4. 调用大模型
+    llm_start = time.time()
     try:
         completion = client.chat.completions.create(
             model=TEXT_MODEL,
@@ -211,37 +267,59 @@ def analyze_text_for_fraud(text: str) -> Dict:
             temperature=0.1,
             response_format={"type": "json_object"}
         )
+        llm_elapsed = time.time() - llm_start
+        print(f"[文本分析] 大模型调用耗时: {llm_elapsed:.2f}s")
+        
         raw = completion.choices[0].message.content
         result = json.loads(raw)
-        
-        # 补充字段以保持与 analyze_image 格式一致
-        return {
-            "success": True,
-            "risk_level": result.get("risk_level", "unknown"),
-            "fraud_type": result.get("fraud_type", ""),
-            "extracted_text": text,  # 原始转写文本
-            "has_qrcode": False,      # 音频没有二维码
-            "has_link": False,        # 音频没有链接
-            "has_contact_info": any(kw in text for kw in ["微信", "QQ", "电话", "加我", "扫码"]),
-            "suspicious_keywords": result.get("suspicious_keywords", []),
-            "reason": result.get("reason", ""),
-            "raw_response": raw
-        }
-    except Exception as e:
-        return _error_result(f"文本分析失败: {str(e)}")
 
-def analyze_audio(audio_path: str, retry: int = 2) -> Dict:
-    """
-    分析音频文件中的诈骗风险（完整流程：转文字 → 文本分析）
+        risk_level = result.get("risk_level", "unknown")
+        confidence = result.get("confidence", 0.5)
+        fraud_type = result.get("fraud_type", "")
+        suspicious_keywords = result.get("suspicious_keywords", [])
+        reason = result.get("reason", "")
+        advice = result.get("advice", "")
+
+        # 人群差异化调整
+        adjust_start = time.time()
+        adjusted_risk_level, adjusted_confidence = adjust_confidence_by_demographic(
+            confidence, risk_level, demographic
+        )
+        # 强制升级规则
+        if should_escalate_for_demographic(fraud_type, demographic, suspicious_keywords):
+            adjusted_risk_level = "high"
+            adjusted_confidence = max(adjusted_confidence, 0.9)
+        adjust_elapsed = time.time() - adjust_start
+        print(f"[文本分析] 人群调整耗时: {adjust_elapsed:.4f}s")
+
+        response = {
+            "success": True,
+            "risk_level": adjusted_risk_level,
+            "fraud_type": fraud_type,
+            "extracted_text": text,
+            "has_qrcode": False,
+            "has_link": False,
+            "has_contact_info": any(kw in text for kw in ["微信", "QQ", "电话", "加我", "扫码"]),
+            "suspicious_keywords": suspicious_keywords,
+            "reason": reason,
+            "advice": advice,
+            "confidence": adjusted_confidence,
+            "raw_response": raw,
+        }
+        if similar_cases:
+            response["retrieved_cases"] = similar_cases
+    except Exception as e:
+        print(f"[文本分析] 大模型调用异常: {e}")
+        return _error_result(f"文本分析失败: {str(e)}")
     
-    Args:
-        audio_path: 音频文件路径
-        retry: 重试次数（目前仅用于转文字，文本分析内部已带重试）
+    total_elapsed = time.time() - total_start
+    print(f"[文本分析] 总耗时: {total_elapsed:.2f}s (检索:{retrieval_elapsed:.2f} 上下文:{context_elapsed:.2f} 提示词:{prompt_elapsed:.2f} LLM:{llm_elapsed:.2f})")
     
-    Returns:
-        与 analyze_image 相同格式的字典
-    """
-    # 1. 音频转文字（可加重试）
+    return response
+
+def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographic.ADULT, retry: int = 2) -> Dict:
+    import time
+    start = time.time()
     text = ""
     for attempt in range(retry + 1):
         text = transcribe_audio(audio_path)
@@ -249,49 +327,30 @@ def analyze_audio(audio_path: str, retry: int = 2) -> Dict:
             break
         if attempt < retry:
             time.sleep(1)
-    
     if not text:
         return _error_result("音频转写失败或音频内容为空")
+    transcribe_time = time.time()
+    print(f"[音频分析] 转写耗时: {transcribe_time - start:.2f}s")
     
-    # 2. 调用文本分析
-    return analyze_text_for_fraud(text)
+    result = analyze_text_for_fraud(text, demographic)
+    total = time.time() - start
+    print(f"[音频分析] 总耗时: {total:.2f}s (其中文本分析: {total - (transcribe_time - start):.2f}s)")
+    return result
 
-# ================== 纯文本分析入口（补全致命漏洞！） ==================
-def analyze_text(text: str) -> Dict:
-    """
-    纯文本反诈分析统一入口
-    供后端文本接口调用，完全复用大模型分析逻辑
-    Args:
-        text: 前端输入的纯文本内容
-    Returns:
-        统一格式的分析结果字典
-    """
-    return analyze_text_for_fraud(text)
+def analyze_text(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
+    return analyze_text_for_fraud(text, demographic)
 
-# ================== 统一入口（供后端调用） ==================
-
-def multimodal_analyze(file_path: str, file_type: str) -> Dict:
-    """
-    统一的多模态分析入口
-    
-    Args:
-        file_path: 文件路径（本地文件）
-        file_type: "image" 或 "audio"
-    
-    Returns:
-        统一格式的分析结果
-    """
+# ================== 统一入口 ==================
+def multimodal_analyze(file_path: str, file_type: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
     if file_type == "image":
-        return analyze_image(file_path)
+        return analyze_image(file_path, demographic)
     elif file_type == "audio":
-        return analyze_audio(file_path)
+        return analyze_audio(file_path, demographic)
     else:
         return _error_result("file_type 必须是 'image' 或 'audio'")
 
 # ================== 辅助函数 ==================
-
 def _error_result(error_msg: str) -> Dict:
-    """生成错误结果字典"""
     return {
         "success": False,
         "error": error_msg,
@@ -303,27 +362,32 @@ def _error_result(error_msg: str) -> Dict:
         "has_contact_info": False,
         "suspicious_keywords": [],
         "reason": error_msg,
+        "advice": "",
+        "confidence": 0.0,
     }
 
 # ================== 测试入口 ==================
 if __name__ == "__main__":
-    # 测试图片
+    # 测试图片（默认成年人）
     local_path = "test_images/游戏交易诈骗.jpeg"
-    result = analyze_image(local_path)
-    print("图片测试结果：")
-    print(json.dumps(result, indent=2, ensure_ascii=False))
-    
-    # 测试音频
+    if os.path.exists(local_path):
+        result = analyze_image(local_path, demographic=UserDemographic.ADULT)
+        print("图片测试结果：")
+        print(json.dumps(result, indent=2, ensure_ascii=False))
+    else:
+        print(f"图片文件不存在: {local_path}")
+
+    # 测试音频（老年人）
     audio_path = "test_audio/冒充客服退款诈骗.mp3"
     if os.path.exists(audio_path):
-        result = analyze_audio(audio_path)
+        result = analyze_audio(audio_path, demographic=UserDemographic.ELDERLY)
         print("音频测试结果：")
         print(json.dumps(result, indent=2, ensure_ascii=False))
     else:
-        print("请准备一个测试音频文件，并修改 audio_path 变量")
-    
-    # 新增：测试纯文本分析
+        print(f"音频文件不存在: {audio_path}")
+
+    # 测试纯文本（儿童）
     test_text = "我们是人性化执法,考虑到你这个年龄,所以没有传唤你到海南这边来"
-    text_result = analyze_text(test_text)
+    text_result = analyze_text(test_text, demographic=UserDemographic.CHILDREN)
     print("\n纯文本测试结果：")
     print(json.dumps(text_result, indent=2, ensure_ascii=False))
