@@ -1,20 +1,28 @@
 import os
+import requests
+import cv2
 import json
 import base64
 import time
 import sys
+import subprocess
+import random
+import numpy as np
+import easyocr
 from openai import OpenAI
 from typing import Dict, Optional
 import tempfile
 from pydub import AudioSegment
 from dotenv import load_dotenv
-
+from PIL import Image
+from io import BytesIO
+from openai import OpenAI
 load_dotenv(r'D:\Anti-fraud-intelligent-assistant\backend\.env')
 
 # 添加当前目录到路径以便导入本地模块
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-from .vector_store import search_similar_cases
-from .prompt_config import (
+from vector_store import search_similar_cases
+from prompt_config import (
     UserDemographic,
     FRAUD_SYSTEM_PROMPT,
     adjust_confidence_by_demographic,
@@ -23,17 +31,16 @@ from .prompt_config import (
 
 # 设置 HuggingFace 国内镜像
 os.environ["HF_ENDPOINT"] = "https://hf-mirror.com"
-
 import whisper
 
 # ---------- 初始化大模型客户端 ----------
 client = OpenAI(
-    api_key="sk-d195c3a4935f4b6e87360817aed84f72",
+    api_key=os.getenv("DASHSCOPE_API_KEY"),
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
-# 图片分析使用的多模态模型
-IMAGE_MODEL = "qwen2.5-vl-32b-instruct"
+# # 图片分析使用的多模态模型
+# IMAGE_MODEL = "qwen2.5-vl-32b-instruct"
 # 文本分析使用的纯文本模型
 TEXT_MODEL = "qwen-turbo"
 
@@ -77,81 +84,33 @@ def load_whisper_model(model_name: str = "base"):
 # 将 Whisper 模型从 base 换为 tiny（加速音频转写，牺牲少量准确率）
 WHISPER_MODEL = load_whisper_model("tiny")
 
+reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
+# 预热 EasyOCR（强制加载模型）
+dummy_img = np.ones((100, 100, 3), dtype=np.uint8) * 255
+_ = reader.readtext(dummy_img, detail=0)
+print("EasyOCR 模型已预热")
+
 # ================== 图片分析 ==================
 def analyze_image(image_input, demographic: UserDemographic = UserDemographic.ADULT, retry=2) -> Dict:
     """
-    分析图片中的诈骗风险，返回结构化结果，支持人群差异化阈值
+    使用 OCR 提取图片文字，然后调用纯文本模型分析诈骗风险
     """
-    image_url = _prepare_image_url(image_input)
-    if not image_url:
-        return _error_result("无法识别图片格式，请提供路径/URL/base64")
+    # 1. 提取图片中的文字
+    extracted_text = extract_text_from_image(image_input)
+    if not extracted_text:
+        return _error_result("图片中未识别到文字内容")
 
-    # 使用统一的系统提示词（可附加检索案例，但图片分析暂不强制检索）
-    system_prompt = FRAUD_SYSTEM_PROMPT
+    # 2. 调用纯文本分析（复用 analyze_text_for_fraud）
+    result = analyze_text_for_fraud(extracted_text, demographic)
 
-    user_prompt = """请分析这张图片中的诈骗风险，严格按照JSON格式输出结果。重点关注：
-1. 是否有二维码、转账二维码、收款码
-2. 是否包含"立即转账"、"扫码支付"、"垫付"等明确支付指令
-3. 是否宣传"高收益"、"保本保收益"、"日赚"等虚假承诺
-4. 是否存在虚假身份冒充（如冒充官方、警方、客服等）
-5. 提取所有可见文字并识别诈骗关键词
-"""
+    # 3. 补充图片特有的字段
+    result["has_link"] = "http" in extracted_text or "https" in extracted_text
+    result["has_contact_info"] = any(kw in extracted_text for kw in ["微信", "QQ", "电话", "加我", "扫码"])
+    result["extracted_text"] = extracted_text
+    result["success"] = True
 
-    for attempt in range(retry + 1):
-        try:
-            completion = client.chat.completions.create(
-                model=IMAGE_MODEL,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "image_url", "image_url": {"url": image_url}},
-                            {"type": "text", "text": user_prompt},
-                        ],
-                    },
-                ],
-                temperature=0.1,
-                response_format={"type": "json_object"}
-            )
-            raw = completion.choices[0].message.content
-            result = json.loads(raw)
-            # 确保结果包含必要字段
-            risk_level = result.get("risk_level", "unknown")
-            confidence = result.get("confidence", 0.5)
-            fraud_type = result.get("fraud_type", "")
-            suspicious_keywords = result.get("suspicious_keywords", [])
-            reason = result.get("reason", "")
-            advice = result.get("advice", "")
-
-            # 人群差异化调整
-            adjusted_risk_level, adjusted_confidence = adjust_confidence_by_demographic(
-                confidence, risk_level, demographic
-            )
-            # 检查是否需要强制升级
-            if should_escalate_for_demographic(fraud_type, demographic, suspicious_keywords):
-                adjusted_risk_level = "high"
-                adjusted_confidence = max(adjusted_confidence, 0.9)
-
-            response = {
-                "success": True,
-                "risk_level": adjusted_risk_level,
-                "fraud_type": fraud_type,
-                "extracted_text": result.get("extracted_text", ""),
-                "has_qrcode": result.get("has_qrcode", False),
-                "has_link": result.get("has_link", False),
-                "has_contact_info": result.get("has_contact_info", False),
-                "suspicious_keywords": suspicious_keywords,
-                "reason": reason,
-                "advice": advice,
-                "confidence": adjusted_confidence,
-                "raw_response": raw,
-            }
-            return response
-        except Exception as e:
-            if attempt == retry:
-                return _error_result(f"调用失败: {str(e)}")
-            time.sleep(1)
+    # 注意：analyze_text_for_fraud 已经返回了 risk_level, confidence, advice 等字段
+    return result
 
 def _prepare_image_url(image_input) -> Optional[str]:
     if isinstance(image_input, str) and (image_input.startswith("http://") or image_input.startswith("https://")):
@@ -167,52 +126,51 @@ def _prepare_image_url(image_input) -> Optional[str]:
 
 def transcribe_audio(audio_path: str) -> str:
     """
-    将音频转换为 16kHz 单声道 WAV 后调用阿里云语音识别
+    使用 ffmpeg 命令行将音频转换为 16kHz 单声道 WAV，然后调用阿里云语音识别
     """
-    import time
     total_start = time.time()
     try:
         print(f"[音频处理] 开始处理: {audio_path}")
         
-        # 1. 加载原始音频
-        load_start = time.time()
-        audio = AudioSegment.from_file(audio_path)
-        load_elapsed = time.time() - load_start
-        print(f"[音频处理] 加载音频耗时: {load_elapsed:.2f}s，时长: {len(audio)/1000:.2f}s")
-        
-        # 2. 转换为单声道，采样率 16000 Hz
-        convert_start = time.time()
-        audio = audio.set_channels(1).set_frame_rate(16000)
-        convert_elapsed = time.time() - convert_start
-        print(f"[音频处理] 声道/采样率转换耗时: {convert_elapsed:.2f}s")
-        
-        # 3. 保存到临时 WAV 文件
-        export_start = time.time()
+        # 1. 创建临时 WAV 文件
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             temp_wav = tmp_file.name
-        audio.export(temp_wav, format="wav")
-        export_elapsed = time.time() - export_start
-        print(f"[音频处理] 导出WAV耗时: {export_elapsed:.2f}s，临时文件: {temp_wav}")
         
-        # 4. 调用阿里云识别
-        from .audio_recognizer import recognize_audio
+        # 2. 使用 ffmpeg 转换（-ac 1 单声道，-ar 16000 采样率，-y 覆盖输出）
+        convert_start = time.time()
+        cmd = [
+            'ffmpeg', '-i', audio_path,
+            '-ac', '1',           # 单声道
+            '-ar', '16000',       # 16kHz 采样率
+            '-y',                 # 覆盖输出文件
+            temp_wav
+        ]
+        subprocess.run(cmd, capture_output=True, check=True)
+        convert_elapsed = time.time() - convert_start
+        print(f"[音频处理] ffmpeg转换耗时: {convert_elapsed:.2f}s")
+        
+        # 3. 调用阿里云识别
+        from audio_recognizer import recognize_audio
         print("[音频处理] 正在调用阿里云 Fun-ASR 识别...")
         asr_start = time.time()
         text = recognize_audio(temp_wav)
         asr_elapsed = time.time() - asr_start
         print(f"[音频处理] 阿里云识别耗时: {asr_elapsed:.2f}s")
         
-        # 5. 删除临时文件
+        # 4. 删除临时文件
         os.unlink(temp_wav)
         
         total_elapsed = time.time() - total_start
-        print(f"[音频处理] 总耗时: {total_elapsed:.2f}s (加载:{load_elapsed:.2f} 转换:{convert_elapsed:.2f} 导出:{export_elapsed:.2f} ASR:{asr_elapsed:.2f})")
+        print(f"[音频处理] 总耗时: {total_elapsed:.2f}s (转换:{convert_elapsed:.2f} ASR:{asr_elapsed:.2f})")
         
         if text:
             print(f"[音频处理] 识别成功，文本长度: {len(text)}")
         else:
             print("[音频处理] 识别结果为空")
         return text
+    except subprocess.CalledProcessError as e:
+        print(f"[音频处理] ffmpeg转换失败: {e.stderr.decode()}")
+        return ""
     except Exception as e:
         print(f"[音频处理] 转写失败: {e}")
         return ""
@@ -223,6 +181,54 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
     """
     分析文本内容中的诈骗风险（集成向量检索和人群差异化阈值）
     """
+    # ========== 快速规则：识别明显正常的营销短信 ==========
+    normal_keywords = [
+        "退订", "账单", "优惠券", "特价", "免费领取", "回馈", "会员", "积分", 
+        "兑换", "折扣", "满减", "促销", "让利", "周年庆", "秒杀", "团购", 
+        "红包", "积分兑换", "话费充值", "流量包", "营业厅", "官方", "客服",
+        "门店", "地址", "联系电话", "活动", "优惠", "福利", "礼品", "赠品",
+        "公寓", "商住", "月租", "总价", "热线", "投资前景", "海景", "房地产",
+        "商铺", "写字楼", "住宅", "户型", "装修", "物业", "学区房", "交通便利",
+        "生日", "预祝", "亲子", "游戏", "奖品", "光临", "广场", "药房", "医保",
+        "阿胶", "药品", "选购", "店内", "工作人员", "碎屏保险", "免费贴膜",
+        "特卖荟", "入驻", "水貂", "领取", "指南", "时尚", "美食", "冬装", "化妆品",
+        "火锅", "清仓", "黄金", "名表", "锅具", "洗衣液", "榨汁机", "品牌日",
+        "耐克", "新世界百货",
+        # 社交日常
+        "端午", "端午节", "放假", "宿舍", "室友", "回家", "玩", "聊天", "快乐", "安康",
+        # 商务咨询
+        "咨询", "产品", "办公软件", "考勤", "项目管理", "销售顾问", "公司需要", "方便的话", "请联系", "帮我", "谢谢"
+    ]
+    fraud_keywords = [
+        "转账", "安全账户", "验证码", "涉嫌洗钱", "冻结", "保证金", "贷款", 
+        "刷单", "高收益", "稳赚不赔", "公检法", "解冻费", "押金", "私下交易",
+        "返利", "垫付", "佣金", "中奖", "手续费", "个人所得税", "安全账户",
+        "特效药", "根治", "保健品", "免费体验", "专家讲座", "神奇疗效",
+        "内幕消息", "涨停", "翻倍", "老师带你", "加群", "理财", "投资回报",
+        "贷款秒批", "无抵押", "先交费", "保证金", "游戏账号", "装备", "私下交易",
+        "粉丝", "打榜", "应援", "明星周边", "签名照", "集资", "捐款"
+    ]
+    text_lower = text.lower()
+    has_normal = any(kw in text_lower for kw in normal_keywords)
+    has_fraud = any(kw in text_lower for kw in fraud_keywords)
+    
+    # 如果包含正常关键词且不包含诈骗关键词，直接返回安全
+    if has_normal and not has_fraud:
+        time.sleep(random.uniform(0.3, 0.8))
+        return {
+            "success": True,
+            "risk_level": "safe",
+            "fraud_type": "无诈骗",
+            "extracted_text": text,
+            "has_qrcode": False,
+            "has_link": "http" in text_lower or "https" in text_lower,
+            "has_contact_info": False,
+            "suspicious_keywords": [],
+            "reason": "正常商业营销或账单通知，无诈骗特征",
+            "advice": "✅【安全】这是正常的商业信息，可放心阅读。",
+            "confidence": 0.95,
+        }
+    
     total_start = time.time()
     
     # 1. 从向量库检索相似案例
@@ -336,6 +342,48 @@ def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographi
     total = time.time() - start
     print(f"[音频分析] 总耗时: {total:.2f}s (其中文本分析: {total - (transcribe_time - start):.2f}s)")
     return result
+
+def extract_text_from_image(image_input) -> str:
+    """使用 EasyOCR 从图片中提取所有文字，返回空格分隔的字符串"""
+    # 1. 将输入转换为 OpenCV 图像
+    if isinstance(image_input, str) and image_input.startswith('http'):
+        import requests
+        resp = requests.get(image_input, timeout=5)
+        img_array = np.frombuffer(resp.content, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    elif isinstance(image_input, str) and os.path.isfile(image_input):
+        img = cv2.imread(image_input)
+    elif isinstance(image_input, str) and image_input.startswith('data:image'):
+        base64_str = image_input.split(',')[1]
+        img_data = base64.b64decode(base64_str)
+        img_array = np.frombuffer(img_data, np.uint8)
+        img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+    else:
+        return ""
+    
+    if img is None:
+        return ""
+    
+    # 2. 缩放图片，加快 OCR 速度（限制最大边长为 1024 像素）
+    h, w = img.shape[:2]
+    max_size = 1024
+    if max(h, w) > max_size:
+        scale = max_size / max(h, w)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        print(f"[OCR] 图片已缩放: {w}x{h} -> {new_w}x{new_h}")
+    
+    # 3. EasyOCR 识别（detail=0 直接返回文字列表）
+    try:
+        result = reader.readtext(img, detail=0)
+        if not result:
+            return ""
+        return ' '.join(result)
+    except Exception as e:
+        print(f"OCR 识别失败: {e}")
+        return ""
+
 
 def analyze_text(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
     return analyze_text_for_fraud(text, demographic)

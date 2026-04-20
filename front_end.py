@@ -1,3 +1,5 @@
+import http
+
 import streamlit as st
 import pandas as pd
 import time
@@ -8,6 +10,23 @@ from datetime import datetime
 import plotly.graph_objects as go
 import plotly.express as px
 
+def get_base64_image(image_path):
+    """将本地图片转为 Base64 data URL"""
+    try:
+        with open(image_path, "rb") as f:
+            data = base64.b64encode(f.read()).decode()
+        # 根据扩展名设置 MIME 类型
+        if image_path.lower().endswith('.png'):
+            mime = "image/png"
+        elif image_path.lower().endswith('.jpg') or image_path.lower().endswith('.jpeg'):
+            mime = "image/jpeg"
+        else:
+            mime = "image/jpeg"
+        return f"data:{mime};base64,{data}"
+    except Exception as e:
+        print(f"图片加载失败: {e}")
+        return ""
+    
 # 后端API配置
 BACKEND_URL = "http://localhost:8000"
 API_PREFIX = "/api/v1"
@@ -43,13 +62,12 @@ st.set_page_config(
 # 初始化主题设置
 if "theme" not in st.session_state:
     st.session_state["theme"] = "light"
-
 # 主题CSS
 light_theme = """
 <style>
     /* 全局背景渐变 */
     body {
-        background-image: url('static/background.jpeg');
+        # background-image: url('https://picsum.photos/id/1/1920/1080')!important;
         background-size: cover;
         background-position: center;
         background-attachment: fixed;
@@ -242,7 +260,25 @@ light_theme = """
     }
 </style>
 """
+# 加载背景图片
+bg_image_base64 = get_base64_image(r"D:\Anti-fraud-intelligent-assistant\static\luke-chesser-IGtutkXikuc-unsplash.jpg")
 
+# 注入背景 CSS
+st.markdown(
+    f"""
+    <style>
+    .stApp {{
+        background: url('{bg_image_base64}') no-repeat center center fixed !important;
+        background-size: cover !important;
+    }}
+    /* 可选：让其他容器透明，避免遮挡背景 */
+    .stAppViewContainer, .stAppViewBlockContainer {{
+        background: transparent !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 dark_theme = """
 <style>
     /* 暗色渐变背景 */
@@ -420,11 +456,29 @@ dark_theme = """
 </style>
 """
 
+
 # 应用主题
 if st.session_state["theme"] == "dark":
     st.markdown(dark_theme, unsafe_allow_html=True)
 else:
     st.markdown(light_theme, unsafe_allow_html=True)
+
+
+# 单独注入背景样式（优先级高）
+st.markdown(
+    f"""
+    <style>
+    body {{
+        background-image: url('{bg_image_base64}') !important;
+        background-size: cover !important;
+        background-position: center !important;
+        background-attachment: fixed !important;
+        background-repeat: no-repeat !important;
+    }}
+    </style>
+    """,
+    unsafe_allow_html=True
+)
 
 # 主题切换按钮
 st.markdown('<div class="theme-toggle">', unsafe_allow_html=True)
@@ -662,9 +716,14 @@ st.markdown('<div class="main-container">', unsafe_allow_html=True)
 # 添加 LOGO
 col1, col2, col3 = st.columns([1, 2, 1])
 with col2:
-    st.title("🛡️ 多模态反诈智能助手")
-    st.caption("基于多模态AI的实时反诈防护系统", help=None)
-    st.markdown("")  # 可选占位
+    st.markdown(
+        '<h1 style="text-align: center; font-size: 4rem;">🛡️ 多模态反诈智能助手</h1>',
+        unsafe_allow_html=True
+    )
+    st.markdown(
+        '<p style="text-align: center; font-size: 0.8rem; color: #6B7280;">基于多模态AI的实时反诈防护系统</p>',
+        unsafe_allow_html=True
+    )
 # 创建三列用于不同模态输入
 col_text, col_audio, col_image = st.columns(3)
 
@@ -701,16 +760,12 @@ with col_image:
     else:
         st.info("未上传图片")
 
-def call_backend_analysis(text, audio_file, image_file, enable_deep_audio, enable_ocr, enable_behavior_profile):
+def call_backend_analysis(text, audio_file, image_file):
     try:
         url = f"{BACKEND_URL}{API_PREFIX}/analyze/multimodal"
         files = {}
         data = {
-            "text": text or "",
-            "enable_deep_analysis": str(enable_behavior_profile).lower(),
-            "enable_deep_audio": str(enable_deep_audio).lower(),
-            "enable_ocr": str(enable_ocr).lower(),
-            "enable_behavior_profile": str(enable_behavior_profile).lower()
+            "text": text or ""
         }
         if audio_file:
             files["audio_file"] = (audio_file.name, audio_file.getvalue(), audio_file.type)
@@ -729,16 +784,6 @@ def call_backend_analysis(text, audio_file, image_file, enable_deep_audio, enabl
         st.error(f"调用API失败: {e}")
         return None
 
-# 高级选项
-with st.expander("🔍 高级分析选项"):
-    col_adv1, col_adv2, col_adv3 = st.columns(3)
-    with col_adv1:
-        enable_deep_audio = st.checkbox("深度语音特征分析", value=True)
-    with col_adv2:
-        enable_ocr = st.checkbox("OCR文字提取", value=True)
-    with col_adv3:
-        enable_behavior_profile = st.checkbox("结合用户行为画像", value=True)
-    st.caption("注：启用更多分析可能增加响应时间，但提升准确率")
 
 def mock_analysis(text, audio_flag, image_flag, role, sensitivity):
     high_risk_keywords = ["安全账户", "转账", "验证码", "涉嫌洗钱", "冻结账户", "保证金", "贷款", "刷单", "投资高回报", "公检法"]
@@ -819,10 +864,7 @@ if analyze_btn:
             backend_result = call_backend_analysis(
                 text=input_data["text"],
                 audio_file=audio_file,
-                image_file=image_file,
-                enable_deep_audio=enable_deep_audio,
-                enable_ocr=enable_ocr,
-                enable_behavior_profile=enable_behavior_profile
+                image_file=image_file
             )
             if backend_result:
                 result = backend_result

@@ -21,7 +21,7 @@ def read_csv_with_fallback(file_path):
             continue
     raise ValueError(f"无法用任何已知编码读取文件: {file_path}")
 
-def import_csv_files(folder_path: str, batch_size=5000):
+def import_csv_files(folder_path: str, batch_size=100):
     csv_files = [f for f in os.listdir(folder_path) if f.endswith('.csv')]
     if not csv_files:
         print(f"在 {folder_path} 中没有找到 CSV 文件")
