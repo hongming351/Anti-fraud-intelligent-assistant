@@ -1,0 +1,316 @@
+{
+  "timestamp": "2026-04-19T10:16:31.402334",
+  "total_cases": 24,
+  "accuracy": 0.9583333333333334,
+  "precision": 1.0,
+  "recall": 0.9166666666666666,
+  "f1_score": 0.9565217391304348,
+  "avg_response_time_sec": 2.590379536151886,
+  "confusion_matrix": {
+    "TP": 11,
+    "TN": 12,
+    "FP": 0,
+    "FN": 1
+  },
+  "modality_stats": {
+    "text": {
+      "count": 20,
+      "accuracy": 0.95,
+      "avg_time": 1.5027864575386047,
+      "confusion_matrix": {
+        "TP": 9,
+        "TN": 10,
+        "FP": 0,
+        "FN": 1
+      }
+    },
+    "image": {
+      "count": 2,
+      "accuracy": 1.0,
+      "avg_time": 8.049285888671875,
+      "confusion_matrix": {
+        "TP": 1,
+        "TN": 1,
+        "FP": 0,
+        "FN": 0
+      }
+    },
+    "audio": {
+      "count": 2,
+      "accuracy": 1.0,
+      "avg_time": 8.00740396976471,
+      "confusion_matrix": {
+        "TP": 1,
+        "TN": 1,
+        "FP": 0,
+        "FN": 0
+      }
+    }
+  },
+  "detailed_results": [
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.35251545906066895,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.7318317890167236,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.650324821472168,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.426192045211792,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.561215877532959,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.5275075435638428,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.5660390853881836,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.4302408695220947,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.3288273811340332,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.5232820510864258,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "冒充公检法",
+      "predicted_fraud_type": "冒充公检法",
+      "processing_time": 3.8907485008239746,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "刷单诈骗",
+      "predicted_fraud_type": "刷单诈骗",
+      "processing_time": 2.3255131244659424,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 0,
+      "expected_fraud_type": "冒充客服退款",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 0.3801901340484619,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "投资理财诈骗",
+      "predicted_fraud_type": "虚假投资理财诈骗",
+      "processing_time": 2.9851443767547607,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "虚假贷款",
+      "predicted_fraud_type": "虚假贷款诈骗",
+      "processing_time": 2.1153078079223633,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "游戏交易诈骗",
+      "predicted_fraud_type": "游戏交易诈骗",
+      "processing_time": 2.9365127086639404,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "追星诈骗",
+      "predicted_fraud_type": "追星诈骗",
+      "processing_time": 2.7020699977874756,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "养生保健品诈骗",
+      "predicted_fraud_type": "养生保健品诈骗",
+      "processing_time": 2.673124074935913,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "冒充熟人诈骗",
+      "predicted_fraud_type": "冒充亲友/熟人诈骗",
+      "processing_time": 2.603341817855835,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": null,
+      "modality": "text",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "虚假中奖诈骗",
+      "predicted_fraud_type": "冒充公检法",
+      "processing_time": 2.345799684524536,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": 21,
+      "modality": "image",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "投资理财诈骗",
+      "predicted_fraud_type": "冒充客服退款",
+      "processing_time": 12.52804684638977,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": 22,
+      "modality": "image",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 3.5705249309539795,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": 23,
+      "modality": "audio",
+      "expected_label": 1,
+      "predicted_label": 1,
+      "expected_fraud_type": "冒充公检法",
+      "predicted_fraud_type": "冒充公检法",
+      "processing_time": 12.552837610244751,
+      "success": true,
+      "details": ""
+    },
+    {
+      "id": 24,
+      "modality": "audio",
+      "expected_label": 0,
+      "predicted_label": 0,
+      "expected_fraud_type": "正常",
+      "predicted_fraud_type": "无诈骗",
+      "processing_time": 3.461970329284668,
+      "success": true,
+      "details": ""
+    }
+  ]
+}
