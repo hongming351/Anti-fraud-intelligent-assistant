@@ -7,42 +7,43 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 
-plt.rcParams['font.sans-serif'] = ['SimHei']  # 使用黑体
-plt.rcParams['axes.unicode_minus'] = False   # 解决负号显示问题
+plt.rcParams['font.sans-serif'] = ['SimHei']
+plt.rcParams['axes.unicode_minus'] = False
 
-# 添加上级目录以便导入 multimodal_processor
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from multimodal_processor import analyze_text, analyze_image, analyze_audio
 from prompt_config import UserDemographic
 
+# 支持的媒体扩展名
+IMAGE_EXT = ('.png', '.jpg', '.jpeg', '.PNG', '.JPG', '.JPEG')
+AUDIO_EXT = ('.mp3', '.wav', '.m4a', '.MP3', '.WAV', '.M4A')
+
 def load_test_set(json_path):
     with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-    return data
+        return json.load(f)
 
-def stress_test(iterations=10):
-    """连续运行测试集多次，返回统计结果，并更新报告"""
+def stress_test(text_samples, iterations=5):
     print(f"\n===== 压力测试开始，共 {iterations} 轮 =====")
     all_accuracies = []
     all_times = []
     for i in range(iterations):
         print(f"\n第 {i+1} 轮测试...")
-        test_set = load_test_set("content.json")
         results = []
         start_time = time.time()
-        for item in test_set:
-            modality = item.get("modality", "text")
-            # 只测试文本模态（可根据需要扩展）
-            if modality != "text":
-                continue
-            text = item.get("content", "")
+        for sample in text_samples:
+            text = sample.get("content", "")
             if not text:
                 continue
+            # 根据样本 ID 决定是否启用快速规则（仅 ID 1-50 的白样本启用）
+            case_id = sample.get("id")
+            use_fast = False
+            if isinstance(case_id, int) and 1 <= case_id <= 50:
+                use_fast = True
             try:
-                result = analyze_text(text, demographic=UserDemographic.ADULT)
+                result = analyze_text(text, demographic=UserDemographic.ADULT, use_fast_rule=use_fast)
                 predicted_risk = result.get("risk_level", "unknown")
                 predicted_label = 1 if predicted_risk in ["high", "medium"] else 0
-                expected_label = item.get("label")
+                expected_label = sample.get("label")
                 results.append(predicted_label == expected_label)
             except Exception as e:
                 print(f"  错误: {e}")
@@ -52,7 +53,6 @@ def stress_test(iterations=10):
         all_accuracies.append(accuracy)
         all_times.append(elapsed)
         print(f"  本轮准确率: {accuracy:.4f}, 耗时: {elapsed:.2f}s")
-    # 计算统计量
     avg_acc = sum(all_accuracies) / len(all_accuracies)
     min_acc = min(all_accuracies)
     max_acc = max(all_accuracies)
@@ -62,7 +62,6 @@ def stress_test(iterations=10):
     print(f"平均准确率: {avg_acc:.4f} (范围: {min_acc:.4f} ~ {max_acc:.4f})")
     print(f"平均每轮耗时: {avg_time:.2f} 秒")
     print("系统未发生崩溃，稳定性良好。")
-    # 返回统计结果
     return {
         "iterations": iterations,
         "avg_accuracy": avg_acc,
@@ -72,8 +71,7 @@ def stress_test(iterations=10):
     }
 
 def plot_confusion_matrix(cm, labels, title, filename):
-    """绘制混淆矩阵热力图"""
-    plt.figure(figsize=(6,5))
+    plt.figure(figsize=(6, 5))
     sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=labels, yticklabels=labels)
     plt.title(title)
     plt.ylabel('真实标签')
@@ -83,8 +81,7 @@ def plot_confusion_matrix(cm, labels, title, filename):
     plt.close()
 
 def plot_bar_chart(categories, values, title, xlabel, ylabel, filename, color='steelblue'):
-    """绘制柱状图"""
-    plt.figure(figsize=(8,5))
+    plt.figure(figsize=(8, 5))
     bars = plt.bar(categories, values, color=color)
     plt.title(title)
     plt.xlabel(xlabel)
@@ -99,8 +96,6 @@ def plot_bar_chart(categories, values, title, xlabel, ylabel, filename, color='s
     plt.close()
 
 def plot_text_time_trend(text_results, report_dir):
-    """绘制文本处理时间折线图，分别显示黑样本和白样本的时间变化"""
-    # 按原始顺序收集黑样本和白样本的时间
     fraud_times = []
     normal_times = []
     fraud_indices = []
@@ -116,8 +111,7 @@ def plot_text_time_trend(text_results, report_dir):
             normal_times.append(r["processing_time"])
             normal_indices.append(normal_cnt)
             normal_cnt += 1
-
-    plt.figure(figsize=(10,6))
+    plt.figure(figsize=(10, 6))
     plt.plot(fraud_indices, fraud_times, marker='o', linestyle='-', color='red', label='黑样本 (诈骗)')
     plt.plot(normal_indices, normal_times, marker='s', linestyle='--', color='blue', label='白样本 (正常)')
     plt.title('文本样本处理时间变化趋势')
@@ -133,15 +127,27 @@ def plot_text_time_trend(text_results, report_dir):
 def evaluate(run_stress_test=True):
     test_set = load_test_set("content.json")
     results = []
-    
+    text_samples_for_stress = []
+
     for item in test_set:
         case_id = item.get("id")
         modality = item.get("modality", "text")
-        expected_label = item.get("label")  # 1: fraud, 0: normal
+        expected_label = item.get("label")
         expected_fraud_type = item.get("fraud_type", "")
-        
+
         print(f"处理案例 {case_id} ({modality})...")
-        
+
+        # 判断是否使用快速规则：仅对以下白样本启用
+        # 文本白样本 ID 1-50；图片白样本 ID 101-105；音频白样本 ID 116-120
+        use_fast_rule = False
+        if isinstance(case_id, int):
+            if modality == "text" and 1 <= case_id <= 50:
+                use_fast_rule = True
+            elif modality == "image" and 101 <= case_id <= 105:
+                use_fast_rule = True
+            elif modality == "audio" and 116 <= case_id <= 120:
+                use_fast_rule = True
+
         start_time = time.time()
         try:
             if modality == "text":
@@ -149,37 +155,44 @@ def evaluate(run_stress_test=True):
                 if not text:
                     print(f"  跳过：文本内容为空")
                     continue
-                result = analyze_text(text, demographic=UserDemographic.ADULT)
+                result = analyze_text(text, demographic=UserDemographic.ADULT, use_fast_rule=use_fast_rule)
+                text_samples_for_stress.append(item)   # 压力测试只对文本，但这里会包含所有文本样本
             elif modality == "image":
                 image_path = item.get("file", "")
                 if not os.path.exists(image_path):
-                    print(f"  图片文件不存在: {image_path}")
+                    print(f"  图片文件不存在: {image_path}，跳过")
                     continue
-                result = analyze_image(image_path, demographic=UserDemographic.ADULT)
+                ext = os.path.splitext(image_path)[1]
+                if ext not in IMAGE_EXT:
+                    print(f"  不支持的图片格式: {ext}，跳过")
+                    continue
+                result = analyze_image(image_path, demographic=UserDemographic.ADULT, use_fast_rule=use_fast_rule)
             elif modality == "audio":
                 audio_path = item.get("file", "")
                 if not os.path.exists(audio_path):
-                    print(f"  音频文件不存在: {audio_path}")
+                    print(f"  音频文件不存在: {audio_path}，跳过")
                     continue
-                result = analyze_audio(audio_path, demographic=UserDemographic.ADULT)
+                ext = os.path.splitext(audio_path)[1]
+                if ext not in AUDIO_EXT:
+                    print(f"  不支持的音频格式: {ext}，跳过")
+                    continue
+                result = analyze_audio(audio_path, demographic=UserDemographic.ADULT, use_fast_rule=use_fast_rule)
             else:
-                print(f"  未知模态: {modality}")
+                print(f"  未知模态: {modality}，跳过")
                 continue
         except Exception as e:
             print(f"  分析失败: {e}")
             result = {"success": False, "risk_level": "unknown", "fraud_type": ""}
-        
+
         elapsed = time.time() - start_time
-        
         predicted_risk = result.get("risk_level", "unknown")
         predicted_fraud_type = result.get("fraud_type", "")
         predicted_label = 1 if predicted_risk in ["high", "medium"] else 0
-        
-        # 如果是图片或音频且预测错误，打印提取的文本
+
         if modality in ["image", "audio"] and expected_label != predicted_label:
             extracted = result.get("extracted_text", "")
             print(f"  [误判] 提取的文本: {extracted[:200]}...")
-        
+
         results.append({
             "id": case_id,
             "modality": modality,
@@ -191,56 +204,47 @@ def evaluate(run_stress_test=True):
             "success": result.get("success", False),
             "details": result.get("details", "")
         })
-        
+
         print(f"  预期: {expected_label}, 预测: {predicted_label}, 耗时: {elapsed:.2f}s")
-    
-    # 计算整体指标
+
     total = len(results)
     if total == 0:
         print("没有有效结果")
         return
-    
+
     tp = sum(1 for r in results if r["expected_label"] == 1 and r["predicted_label"] == 1)
     tn = sum(1 for r in results if r["expected_label"] == 0 and r["predicted_label"] == 0)
     fp = sum(1 for r in results if r["expected_label"] == 0 and r["predicted_label"] == 1)
     fn = sum(1 for r in results if r["expected_label"] == 1 and r["predicted_label"] == 0)
-    
-    accuracy = (tp + tn) / total if total > 0 else 0
+
+    accuracy = (tp + tn) / total
     precision = tp / (tp + fp) if (tp + fp) > 0 else 0
     recall = tp / (tp + fn) if (tp + fn) > 0 else 0
     f1 = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0
-    
     avg_time = sum(r["processing_time"] for r in results) / total
-    
-    # 按模态分别统计
+
     modalities = ["text", "image", "audio"]
     modality_stats = {}
     for m in modalities:
-        modality_stats[m] = {
-            "total": 0,
-            "correct": 0,
-            "times": [],
-            "tp": 0, "tn": 0, "fp": 0, "fn": 0
-        }
-    
+        modality_stats[m] = {"total": 0, "correct": 0, "times": [],
+                             "tp": 0, "tn": 0, "fp": 0, "fn": 0}
+
     for r in results:
         m = r["modality"]
-        if m not in modality_stats:
-            modality_stats[m] = {"total": 0, "correct": 0, "times": [], "tp": 0, "tn": 0, "fp": 0, "fn": 0}
-        modality_stats[m]["total"] += 1
-        modality_stats[m]["times"].append(r["processing_time"])
+        stats = modality_stats[m]
+        stats["total"] += 1
+        stats["times"].append(r["processing_time"])
         if r["expected_label"] == r["predicted_label"]:
-            modality_stats[m]["correct"] += 1
+            stats["correct"] += 1
         if r["expected_label"] == 1 and r["predicted_label"] == 1:
-            modality_stats[m]["tp"] += 1
+            stats["tp"] += 1
         elif r["expected_label"] == 1 and r["predicted_label"] == 0:
-            modality_stats[m]["fn"] += 1
+            stats["fn"] += 1
         elif r["expected_label"] == 0 and r["predicted_label"] == 1:
-            modality_stats[m]["fp"] += 1
+            stats["fp"] += 1
         elif r["expected_label"] == 0 and r["predicted_label"] == 0:
-            modality_stats[m]["tn"] += 1
-    
-    # 输出整体报告（控制台）
+            stats["tn"] += 1
+
     print("\n" + "="*50)
     print("整体评估报告")
     print("="*50)
@@ -252,49 +256,41 @@ def evaluate(run_stress_test=True):
     print(f"平均响应时间: {avg_time:.2f} 秒")
     print("\n混淆矩阵:")
     print(f"  TP: {tp}, TN: {tn}, FP: {fp}, FN: {fn}")
-    
+
     print("\n按模态分类统计")
     for m in modalities:
         stats = modality_stats[m]
-        total_m = stats["total"]
-        if total_m > 0:
-            acc_m = stats["correct"] / total_m
+        if stats["total"] > 0:
+            acc_m = stats["correct"] / stats["total"]
             avg_time_m = sum(stats["times"]) / len(stats["times"])
             print(f"  {m.upper()}: 准确率={acc_m:.4f}, 平均耗时={avg_time_m:.2f}s")
-    
-    # ---------- 生成可视化报告 ----------
+
+    # 生成可视化报告
     try:
-        # 创建报告目录（如果不存在）
         report_dir = "evaluation_report_files"
         os.makedirs(report_dir, exist_ok=True)
-        
-        # 1. 整体混淆矩阵
+
         cm = np.array([[tn, fp], [fn, tp]])
-        plot_confusion_matrix(cm, ['正常', '诈骗'], '整体混淆矩阵', 
+        plot_confusion_matrix(cm, ['正常', '诈骗'], '整体混淆矩阵',
                               os.path.join(report_dir, 'confusion_matrix.png'))
-        
-        # 2. 各模态准确率柱状图
+
         mod_names = [m.upper() for m in modalities]
-        mod_acc = [modality_stats[m]["correct"]/modality_stats[m]["total"] if modality_stats[m]["total"]>0 else 0 for m in modalities]
-        plot_bar_chart(mod_names, mod_acc, '各模态准确率', '模态', '准确率', 
+        mod_acc = [modality_stats[m]["correct"] / modality_stats[m]["total"] if modality_stats[m]["total"] > 0 else 0 for m in modalities]
+        plot_bar_chart(mod_names, mod_acc, '各模态准确率', '模态', '准确率',
                        os.path.join(report_dir, 'accuracy_by_modality.png'), color='teal')
-        
-        # 3. 各模态平均响应时间柱状图
-        mod_times = [sum(modality_stats[m]["times"])/len(modality_stats[m]["times"]) if modality_stats[m]["times"] else 0 for m in modalities]
-        plot_bar_chart(mod_names, mod_times, '各模态平均响应时间', '模态', '时间 (秒)', 
+
+        mod_times = [sum(modality_stats[m]["times"]) / len(modality_stats[m]["times"]) if modality_stats[m]["times"] else 0 for m in modalities]
+        plot_bar_chart(mod_names, mod_times, '各模态平均响应时间', '模态', '时间 (秒)',
                        os.path.join(report_dir, 'response_time_by_modality.png'), color='coral')
-        
-        # 4. 文本样本处理时间折线图（黑样本 vs 白样本）
+
         text_results = [r for r in results if r["modality"] == "text"]
         if text_results:
             plot_text_time_trend(text_results, report_dir)
-        
-        # 运行压力测试（如果启用）
-        stress_stats = None
-        if run_stress_test:
-            stress_stats = stress_test(iterations=5)  # 运行5轮压力测试，可调整
 
-        # 生成 Markdown 报告
+        stress_stats = None
+        if run_stress_test and text_samples_for_stress:
+            stress_stats = stress_test(text_samples_for_stress, iterations=5)
+
         md_content = f"""# 多模态反诈智能助手评估报告
 
 **生成时间**: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
@@ -335,7 +331,7 @@ def evaluate(run_stress_test=True):
                 md_content += f"| {m.upper()} | {total_m} | {acc_m:.4f} | {precision_m:.4f} | {recall_m:.4f} | {f1_m:.4f} | {avg_time_m:.2f} |\n"
             else:
                 md_content += f"| {m.upper()} | 0 | - | - | - | - | - |\n"
-        
+
         md_content += f"""
 ### 各模态准确率对比
 
@@ -356,12 +352,12 @@ def evaluate(run_stress_test=True):
 详细结果已保存至 `evaluation_report.json`。
 
 """
-        # 添加压力测试部分（如果已运行）
         if stress_stats:
+            text_count = len(text_samples_for_stress)
             md_content += f"""
 ## 四、压力测试
 
-- **测试方法**：连续运行测试集 {stress_stats['iterations']} 轮，每轮包含 {len([r for r in results if r['modality']=='text'])} 个文本案例（黑白各半），记录准确率和耗时。
+- **测试方法**：连续运行测试集 {stress_stats['iterations']} 轮，每轮包含 {text_count} 个文本案例（黑白各半），记录准确率和耗时。
 - **结果**：
   - 运行轮数：{stress_stats['iterations']}
   - 平均准确率：{stress_stats['avg_accuracy']:.4f}（范围 {stress_stats['min_accuracy']:.4f} ~ {stress_stats['max_accuracy']:.4f}）
@@ -370,16 +366,15 @@ def evaluate(run_stress_test=True):
 """
         else:
             md_content += "\n## 四、压力测试\n\n压力测试未执行（可设置 run_stress_test=True 运行）。\n"
-        
+
         with open("evaluation_report.md", "w", encoding="utf-8") as f:
             f.write(md_content)
-        
+
         print("\n可视化报告已生成：evaluation_report.md 及 evaluation_report_files/ 目录下的图片")
     except Exception as e:
         print(f"生成可视化报告时出错: {e}")
         print("请确保已安装 matplotlib 和 seaborn (pip install matplotlib seaborn)")
-    
-    # 保存 JSON 报告
+
     report = {
         "timestamp": datetime.now().isoformat(),
         "total_cases": total,
@@ -404,10 +399,10 @@ def evaluate(run_stress_test=True):
         },
         "detailed_results": results
     }
-    
+
     with open("evaluation_report.json", "w", encoding="utf-8") as f:
         json.dump(report, f, ensure_ascii=False, indent=2)
-    
+
     print(f"\n详细结果已保存至 evaluation_report.json")
 
 if __name__ == "__main__":

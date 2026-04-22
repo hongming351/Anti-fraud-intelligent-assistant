@@ -16,7 +16,7 @@ from pydub import AudioSegment
 from dotenv import load_dotenv
 from PIL import Image
 from io import BytesIO
-from openai import OpenAI
+
 load_dotenv(r'D:\Anti-fraud-intelligent-assistant\backend\.env')
 
 # 添加当前目录到路径以便导入本地模块
@@ -39,8 +39,6 @@ client = OpenAI(
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
-# # 图片分析使用的多模态模型
-# IMAGE_MODEL = "qwen2.5-vl-32b-instruct"
 # 文本分析使用的纯文本模型
 TEXT_MODEL = "qwen-turbo"
 
@@ -81,27 +79,28 @@ def load_whisper_model(model_name: str = "base"):
         print("使用默认方式加载模型...")
         return whisper.load_model(model_name)
 
-# 将 Whisper 模型从 base 换为 tiny（加速音频转写，牺牲少量准确率）
 WHISPER_MODEL = load_whisper_model("tiny")
 
+# ---------- EasyOCR 初始化 ----------
 reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-# 预热 EasyOCR（强制加载模型）
+# 预热 EasyOCR
 dummy_img = np.ones((100, 100, 3), dtype=np.uint8) * 255
 _ = reader.readtext(dummy_img, detail=0)
 print("EasyOCR 模型已预热")
 
 # ================== 图片分析 ==================
-def analyze_image(image_input, demographic: UserDemographic = UserDemographic.ADULT, retry=2) -> Dict:
+def analyze_image(image_input, demographic: UserDemographic = UserDemographic.ADULT, use_fast_rule: bool = False, retry=2) -> Dict:
     """
     使用 OCR 提取图片文字，然后调用纯文本模型分析诈骗风险
+    :param use_fast_rule: 是否启用快速规则（默认 False）
     """
     # 1. 提取图片中的文字
     extracted_text = extract_text_from_image(image_input)
     if not extracted_text:
         return _error_result("图片中未识别到文字内容")
 
-    # 2. 调用纯文本分析（复用 analyze_text_for_fraud）
-    result = analyze_text_for_fraud(extracted_text, demographic)
+    # 2. 调用纯文本分析（传递 use_fast_rule）
+    result = analyze_text_for_fraud(extracted_text, demographic, use_fast_rule=use_fast_rule)
 
     # 3. 补充图片特有的字段
     result["has_link"] = "http" in extracted_text or "https" in extracted_text
@@ -109,7 +108,6 @@ def analyze_image(image_input, demographic: UserDemographic = UserDemographic.AD
     result["extracted_text"] = extracted_text
     result["success"] = True
 
-    # 注意：analyze_text_for_fraud 已经返回了 risk_level, confidence, advice 等字段
     return result
 
 def _prepare_image_url(image_input) -> Optional[str]:
@@ -136,7 +134,7 @@ def transcribe_audio(audio_path: str) -> str:
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
             temp_wav = tmp_file.name
         
-        # 2. 使用 ffmpeg 转换（-ac 1 单声道，-ar 16000 采样率，-y 覆盖输出）
+        # 2. 使用 ffmpeg 转换
         convert_start = time.time()
         cmd = [
             'ffmpeg', '-i', audio_path,
@@ -175,60 +173,145 @@ def transcribe_audio(audio_path: str) -> str:
         print(f"[音频处理] 转写失败: {e}")
         return ""
 
-import time
-
-def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
+def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemographic.ADULT, use_fast_rule: bool = False) -> Dict:
     """
     分析文本内容中的诈骗风险（集成向量检索和人群差异化阈值）
+    :param use_fast_rule: 是否启用快速规则（默认 False）
     """
-    # ========== 快速规则：识别明显正常的营销短信 ==========
-    normal_keywords = [
-        "退订", "账单", "优惠券", "特价", "免费领取", "回馈", "会员", "积分", 
-        "兑换", "折扣", "满减", "促销", "让利", "周年庆", "秒杀", "团购", 
-        "红包", "积分兑换", "话费充值", "流量包", "营业厅", "官方", "客服",
-        "门店", "地址", "联系电话", "活动", "优惠", "福利", "礼品", "赠品",
-        "公寓", "商住", "月租", "总价", "热线", "投资前景", "海景", "房地产",
-        "商铺", "写字楼", "住宅", "户型", "装修", "物业", "学区房", "交通便利",
-        "生日", "预祝", "亲子", "游戏", "奖品", "光临", "广场", "药房", "医保",
-        "阿胶", "药品", "选购", "店内", "工作人员", "碎屏保险", "免费贴膜",
-        "特卖荟", "入驻", "水貂", "领取", "指南", "时尚", "美食", "冬装", "化妆品",
-        "火锅", "清仓", "黄金", "名表", "锅具", "洗衣液", "榨汁机", "品牌日",
-        "耐克", "新世界百货",
-        # 社交日常
-        "端午", "端午节", "放假", "宿舍", "室友", "回家", "玩", "聊天", "快乐", "安康",
-        # 商务咨询
-        "咨询", "产品", "办公软件", "考勤", "项目管理", "销售顾问", "公司需要", "方便的话", "请联系", "帮我", "谢谢"
-    ]
-    fraud_keywords = [
-        "转账", "安全账户", "验证码", "涉嫌洗钱", "冻结", "保证金", "贷款", 
-        "刷单", "高收益", "稳赚不赔", "公检法", "解冻费", "押金", "私下交易",
-        "返利", "垫付", "佣金", "中奖", "手续费", "个人所得税", "安全账户",
-        "特效药", "根治", "保健品", "免费体验", "专家讲座", "神奇疗效",
-        "内幕消息", "涨停", "翻倍", "老师带你", "加群", "理财", "投资回报",
-        "贷款秒批", "无抵押", "先交费", "保证金", "游戏账号", "装备", "私下交易",
-        "粉丝", "打榜", "应援", "明星周边", "签名照", "集资", "捐款"
-    ]
     text_lower = text.lower()
-    has_normal = any(kw in text_lower for kw in normal_keywords)
-    has_fraud = any(kw in text_lower for kw in fraud_keywords)
+    text_len = len(text.strip())
     
-    # 如果包含正常关键词且不包含诈骗关键词，直接返回安全
-    if has_normal and not has_fraud:
-        time.sleep(random.uniform(0.3, 0.8))
-        return {
-            "success": True,
-            "risk_level": "safe",
-            "fraud_type": "无诈骗",
-            "extracted_text": text,
-            "has_qrcode": False,
-            "has_link": "http" in text_lower or "https" in text_lower,
-            "has_contact_info": False,
-            "suspicious_keywords": [],
-            "reason": "正常商业营销或账单通知，无诈骗特征",
-            "advice": "✅【安全】这是正常的商业信息，可放心阅读。",
-            "confidence": 0.95,
-        }
+    # ========== 快速规则（仅在 use_fast_rule=True 时执行） ==========
+    if use_fast_rule:
+        # 1. 高危快速规则
+        high_risk_fraud_keywords = [
+            "安全账户", "涉嫌洗钱", "解冻费", "公检法", "转账到", "验证码", "保证金", "冻结",
+            "假一赔三", "退款链接", "日收益", "保本保息", "内部消息"
+        ]
+        strong_normal_keywords = [
+            "退订", "账单", "营业厅", "官方", "客服", "门店", "药房", "医保", "公积金",
+            "生日", "预祝", "亲子", "光临", "广场", "端午", "安康"
+        ]
+        has_high_risk = any(kw in text_lower for kw in high_risk_fraud_keywords)
+        has_strong_normal = any(kw in text_lower for kw in strong_normal_keywords)
+        
+        if has_high_risk and not has_strong_normal:
+            print(f"[快速规则] 高危诈骗词命中，直接判高危")
+            return {
+                "success": True,
+                "risk_level": "high",
+                "fraud_type": "疑似诈骗",
+                "extracted_text": text,
+                "has_qrcode": False,
+                "has_link": "http" in text_lower or "https" in text_lower,
+                "has_contact_info": any(kw in text for kw in ["微信", "QQ", "电话", "加我", "扫码"]),
+                "suspicious_keywords": [kw for kw in high_risk_fraud_keywords if kw in text_lower],
+                "reason": "快速规则检测到高危诈骗关键词",
+                "advice": "🚨【紧急】该内容包含典型诈骗特征，请勿转账或泄露个人信息！",
+                "confidence": 0.95,
+            }
+        
+        # 2. 正常安全规则
+        normal_keywords = [
+            "辛苦", "老婆", "老公", "亲爱的", "宝贝", "早安", "晚安", "么么哒",
+            "开盘", "首期", "诚意金", "现房", "实景", "耀世", "开启", "致电",
+            "惊喜", "优惠哦", "付万", "关注", "持续关注"
+            # 运营商/账单类
+            "退订", "账单", "话费", "流量", "套餐", "积分", "积分兑换", "话费充值", "流量包", "营业厅",
+            # 营销促销类
+            "优惠券", "特价", "免费领取", "回馈", "会员", "兑换", "折扣", "满减", "促销", "让利",
+            "周年庆", "秒杀", "团购", "红包", "福利", "礼品", "赠品", "品牌日", "清仓",
+            # 门店/客服
+            "门店", "地址", "联系电话", "客服", "官方", "工作人员", "热线",
+            # 房产类
+            "公寓", "商住", "月租", "总价", "投资前景", "海景", "房地产", "商铺", "写字楼", "住宅",
+            "户型", "装修", "物业", "学区房", "交通便利", "首付", "现房", "洋房", "别墅", "样板间",
+            "看房", "送礼品", "公积金",
+            # 生活/节日类
+            "生日", "预祝", "亲子", "游戏", "奖品", "光临", "广场", "端午", "放假", "回家", "快乐", "安康",
+            # 药店/健康
+            "药房", "医保", "阿胶", "药品", "选购", "店内", "碎屏保险", "免费贴膜",
+            # 商场/品牌
+            "特卖荟", "入驻", "水貂", "领取", "指南", "时尚", "美食", "冬装", "化妆品", "火锅",
+            "黄金", "名表", "锅具", "洗衣液", "榨汁机", "耐克", "新世界百货",
+            # 日常对话
+            "起床", "化妆", "吃饭", "回来", "抱抱", "爱你", "么么哒", "晚安", "早安",
+            "什么时候", "晚上", "中午", "明天", "今天", "周末", "宿舍", "室友", "玩", "聊天",
+            # 工作沟通
+            "项目进度", "需求文档", "测试用例", "审核", "附上", "补充", "考勤", "项目管理",
+            "办公软件", "销售顾问", "公司需要", "方便的话", "请联系", "帮我", "谢谢", "咨询", "产品"
+        ]
+        
+        fraud_keywords = [
+            # 核心诈骗词
+            "转账", "安全账户", "验证码", "涉嫌洗钱", "冻结", "解冻费", "刷单", "高收益", "稳赚不赔",
+            "公检法", "押金", "私下交易", "返利", "垫付", "佣金", "中奖", "个人所得税",
+            "特效药", "根治", "保健品", "免费体验", "专家讲座", "神奇疗效",
+            "内幕消息", "涨停", "翻倍", "老师带你", "加群", "投资回报",
+            "贷款秒批", "无抵押", "先交费", "游戏账号", "装备", "粉丝", "打榜", "应援",
+            "明星周边", "签名照", "集资", "捐款",
+            # 新增针对性诈骗词
+            "假一赔三", "退款链接", "开通", "缴纳", "日收益", "保本保息", "充值", "内部消息", "稳赚",
+            "赔三", "解冻费"
+        ]
+        
+        has_normal = any(kw in text_lower for kw in normal_keywords)
+        has_fraud = any(kw in text_lower for kw in fraud_keywords)
+        
+        # 如果包含正常关键词且不包含诈骗关键词，直接返回安全
+        if has_normal and not has_fraud:
+            time.sleep(random.uniform(0.3, 0.8))
+            print(f"[快速规则] 安全：命中正常词且无诈骗词")
+            return {
+                "success": True,
+                "risk_level": "safe",
+                "fraud_type": "无诈骗",
+                "extracted_text": text,
+                "has_qrcode": False,
+                "has_link": "http" in text_lower or "https" in text_lower,
+                "has_contact_info": False,
+                "suspicious_keywords": [],
+                "reason": "正常商业营销或日常沟通，无诈骗特征",
+                "advice": "✅【安全】这是正常的商业信息或日常对话，可放心阅读。",
+                "confidence": 0.95,
+            }
+        
+        # 3. 长度阈值快速安全规则
+        if text_len < 100 and not has_fraud:
+            print(f"[快速规则] 安全：短文本且无诈骗词")
+            return {
+                "success": True,
+                "risk_level": "safe",
+                "fraud_type": "无诈骗",
+                "extracted_text": text,
+                "has_qrcode": False,
+                "has_link": "http" in text_lower or "https" in text_lower,
+                "has_contact_info": False,
+                "suspicious_keywords": [],
+                "reason": "文本过短且无诈骗特征，视为安全",
+                "advice": "✅【安全】该消息无诈骗特征。",
+                "confidence": 0.90,
+            }
+        
+        # 4. 纯数字/符号/无意义文本过滤
+        alnum_count = sum(1 for c in text if c.isalnum())
+        if text_len > 0 and alnum_count / text_len < 0.2 and text_len < 100:
+            print(f"[快速规则] 安全：文本主要为符号/数字")
+            return {
+                "success": True,
+                "risk_level": "safe",
+                "fraud_type": "无诈骗",
+                "extracted_text": text,
+                "has_qrcode": False,
+                "has_link": False,
+                "has_contact_info": False,
+                "suspicious_keywords": [],
+                "reason": "文本内容主要为符号或数字，无明确诈骗意图",
+                "advice": "✅【安全】该消息无实质内容。",
+                "confidence": 0.85,
+            }
     
+    # ========== 原有流程：向量检索 + 大模型（无论是否启用快速规则，只要没有被快速规则拦截，都会执行） ==========
     total_start = time.time()
     
     # 1. 从向量库检索相似案例
@@ -323,7 +406,7 @@ def analyze_text_for_fraud(text: str, demographic: UserDemographic = UserDemogra
     
     return response
 
-def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographic.ADULT, retry: int = 2) -> Dict:
+def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographic.ADULT, use_fast_rule: bool = False, retry: int = 2) -> Dict:
     import time
     start = time.time()
     text = ""
@@ -338,10 +421,13 @@ def analyze_audio(audio_path: str, demographic: UserDemographic = UserDemographi
     transcribe_time = time.time()
     print(f"[音频分析] 转写耗时: {transcribe_time - start:.2f}s")
     
-    result = analyze_text_for_fraud(text, demographic)
+    result = analyze_text_for_fraud(text, demographic, use_fast_rule=use_fast_rule)
     total = time.time() - start
     print(f"[音频分析] 总耗时: {total:.2f}s (其中文本分析: {total - (transcribe_time - start):.2f}s)")
     return result
+
+def analyze_text(text: str, demographic: UserDemographic = UserDemographic.ADULT, use_fast_rule: bool = False) -> Dict:
+    return analyze_text_for_fraud(text, demographic, use_fast_rule=use_fast_rule)
 
 def extract_text_from_image(image_input) -> str:
     """使用 EasyOCR 从图片中提取所有文字，返回空格分隔的字符串"""
@@ -384,20 +470,14 @@ def extract_text_from_image(image_input) -> str:
         print(f"OCR 识别失败: {e}")
         return ""
 
-
-def analyze_text(text: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
-    return analyze_text_for_fraud(text, demographic)
-
-# ================== 统一入口 ==================
-def multimodal_analyze(file_path: str, file_type: str, demographic: UserDemographic = UserDemographic.ADULT) -> Dict:
+def multimodal_analyze(file_path: str, file_type: str, demographic: UserDemographic = UserDemographic.ADULT, use_fast_rule: bool = False) -> Dict:
     if file_type == "image":
-        return analyze_image(file_path, demographic)
+        return analyze_image(file_path, demographic, use_fast_rule=use_fast_rule)
     elif file_type == "audio":
-        return analyze_audio(file_path, demographic)
+        return analyze_audio(file_path, demographic, use_fast_rule=use_fast_rule)
     else:
         return _error_result("file_type 必须是 'image' 或 'audio'")
 
-# ================== 辅助函数 ==================
 def _error_result(error_msg: str) -> Dict:
     return {
         "success": False,
