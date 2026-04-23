@@ -10,6 +10,10 @@ class Settings(BaseSettings):
     API_V1_PREFIX: str = "/api/v1"
     DEBUG: bool = True
 
+    # 邮箱预警功能（注意：字段名与 email_service 中使用的保持一致）
+    QQ_EMAIL: str = os.getenv("QQ_EMAIL", "")
+    QQ_AUTHORIZATION_CODE: str = os.getenv("QQ_AUTHORIZATION_CODE", "")   # 修改为 QQ_AUTHORIZATION_CODE，与 email_service 匹配
+    
     # API 文档配置
     DOCS_URL: str = "/docs"
     REDOC_URL: str = "/redoc"
@@ -42,6 +46,15 @@ class Settings(BaseSettings):
     
     # 监护人通知配置
     ENABLE_GUARDIAN_NOTIFICATION: bool = True
+    
+    # LLM API 配置
+    LLM_API_KEY: str = os.getenv("LLM_API_KEY", "")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen-turbo")
+    LLM_API_TIMEOUT: int = 30
+    LLM_CACHE_ENABLED: bool = True
+    
+    # 阿里云百炼 API 配置
+    DASHSCOPE_API_KEY: str = os.getenv("DASHSCOPE_API_KEY", "")
     
     class Config:
         env_file = ".env"

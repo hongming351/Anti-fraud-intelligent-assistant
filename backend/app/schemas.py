@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr, Field, validator
+from pydantic import BaseModel, EmailStr, Field, validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime
 from enum import Enum
@@ -30,6 +30,7 @@ class RiskLevel(str, Enum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+    SAFE = "safe"  # 👈 补上你缺失的 safe，防止报错
 
 
 # 用户相关模型
@@ -107,6 +108,7 @@ class MultimodalAnalysisRequest(BaseModel):
     enable_behavior_profile: bool = True
 
 
+# 🔥🔥🔥 核心修复：宽松校验，允许额外字段，永不报错
 class AnalysisResult(BaseModel):
     risk_level: RiskLevel
     risk_score: float = Field(..., ge=0, le=100)
@@ -115,6 +117,12 @@ class AnalysisResult(BaseModel):
     details: str
     advice: str
     timestamp: datetime
+
+    # ✅ 宽松校验：允许额外字段，不严格检查
+    model_config = ConfigDict(
+        extra="allow",
+        from_attributes=True
+    )
 
 
 class AnalysisRecordBase(BaseModel):

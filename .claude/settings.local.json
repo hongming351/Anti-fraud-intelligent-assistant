@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '..'\\); from frontend.components.theme import init_theme_state; print\\('Import successful'\\)\")",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, '..'\\); exec\\(open\\('pages/01_Login.py'\\).read\\(\\)\\); print\\('Login page import test passed'\\)\")"
+    ]
+  }
+}

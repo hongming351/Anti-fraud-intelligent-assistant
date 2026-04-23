@@ -1,12 +1,16 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 import logging
 import os
-
+from apscheduler.schedulers.background import BackgroundScheduler
 from .config import settings
 from .database import init_db
-from .api import auth, analyze
+from .api import auth, analyze, admin
+
+# 导入定时任务函数
+from app.services.auto_updater import update_knowledge_base_job
 
 # 配置日志
 logging.basicConfig(
@@ -15,6 +19,50 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# 创建调度器实例
+scheduler = BackgroundScheduler()
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    # 启动时执行
+    logger.info("启动反诈智能助手后端服务...")
+    
+    # 初始化数据库
+    try:
+        init_db()
+        logger.info("数据库初始化完成")
+    except Exception as e:
+        logger.error(f"数据库初始化失败: {e}")
+        raise
+    
+    # 确保上传目录存在
+    os.makedirs(os.path.join(settings.UPLOAD_DIR, "audio"), exist_ok=True)
+    os.makedirs(os.path.join(settings.UPLOAD_DIR, "image"), exist_ok=True)
+    logger.info(f"上传目录已创建: {settings.UPLOAD_DIR}")
+    
+    # ---------- 启动定时任务 ----------
+    # 每天凌晨3点执行一次
+    scheduler.add_job(
+        update_knowledge_base_job,
+        'cron',
+        hour=3,
+        minute=0,
+        id='auto_update_knowledge',
+        replace_existing=True
+    )
+    scheduler.start()
+    logger.info("定时任务调度器已启动，每天凌晨3:00自动更新知识库")
+    
+    logger.info(f"服务已启动，访问 http://localhost:8000/docs 查看API文档")
+    
+    yield  # 应用运行期间
+    
+    # 关闭时执行
+    logger.info("关闭反诈智能助手后端服务...")
+    scheduler.shutdown()  # 关闭调度器
+
+
 # 创建FastAPI应用
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -22,6 +70,7 @@ app = FastAPI(
     docs_url=settings.DOCS_URL if settings.DEBUG else None,
     redoc_url=settings.REDOC_URL if settings.DEBUG else None,
     openapi_url=settings.OPENAPI_URL if settings.DEBUG else None,
+    lifespan=lifespan,
 )
 
 # 配置CORS
@@ -39,33 +88,7 @@ app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads"
 # 包含路由
 app.include_router(auth.router, prefix=settings.API_V1_PREFIX)
 app.include_router(analyze.router, prefix=settings.API_V1_PREFIX)
-
-
-@app.on_event("startup")
-async def startup_event():
-    """应用启动时执行"""
-    logger.info("启动反诈智能助手后端服务...")
-    
-    # 初始化数据库
-    try:
-        init_db()
-        logger.info("数据库初始化完成")
-    except Exception as e:
-        logger.error(f"数据库初始化失败: {e}")
-        raise
-    
-    # 确保上传目录存在
-    os.makedirs(os.path.join(settings.UPLOAD_DIR, "audio"), exist_ok=True)
-    os.makedirs(os.path.join(settings.UPLOAD_DIR, "image"), exist_ok=True)
-    logger.info(f"上传目录已创建: {settings.UPLOAD_DIR}")
-    
-    logger.info(f"服务已启动，访问 http://localhost:8000/docs 查看API文档")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """应用关闭时执行"""
-    logger.info("关闭反诈智能助手后端服务...")
+app.include_router(admin.router, prefix=settings.API_V1_PREFIX)
 
 
 @app.get("/")
